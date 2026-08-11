@@ -1,0 +1,39 @@
+Seed set to 42
+/rds/general/user/ap5625/home/miniforge3/envs/perturbgen/lib/python3.11/site-packages/anndata/_core/anndata.py:1758: UserWarning: Observation names are not unique. To make them unique, call `.obs_names_make_unique`.
+  utils.warn_names_duplicates("obs")
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+HPU available: False, using: 0 HPUs
+You are using a CUDA device ('NVIDIA L40S') that has Tensor Cores. To properly utilize them, you should set `torch.set_float32_matmul_precision('medium' | 'high')` which will trade-off precision for performance. For more details, read https://pytorch.org/docs/stable/generated/torch.set_float32_matmul_precision.html#torch.set_float32_matmul_precision
+wandb: WARNING The anonymous setting has no effect and will be removed in a future version.
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: Currently logged in as: ap5625 (ap5625-imperial-college-london) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run hofslg03
+wandb: Tracking run with wandb version 0.27.1
+wandb: Run data is saved locally in logs/wandb/run-20260626_151424-hofslg03
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run 20260626_1513_cellgen
+wandb: ⭐️ View project at https://wandb.ai/ap5625-imperial-college-london/ttransformer
+wandb: 🚀 View run at https://wandb.ai/ap5625-imperial-college-london/ttransformer/runs/hofslg03
+wandb: Detected [huggingface_hub.inference] in use.
+wandb: Use W&B Weave for improved LLM call tracing. Install Weave with `pip install weave` then add `import weave` to the top of your script.
+wandb: For more information, check out the docs at: https://weave-docs.wandb.ai
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [GPU-6df9252a-56dc-f666-305b-7f532e73606c]
+
+  | Name         | Type             | Params | Mode 
+----------------------------------------------------------
+0 | transformer  | PerturbGen       | 90.6 M | train
+1 | masking_loss | CrossEntropyLoss | 0      | train
+2 | perplexity   | Perplexity       | 0      | train
+3 | mse          | MeanSquaredError | 0      | train
+----------------------------------------------------------
+18.9 M    Trainable params
+71.7 M    Non-trainable params
+90.6 M    Total params
+362.452   Total estimated model params size (MB)
+160       Modules in train mode
+198       Modules in eval mode
+/rds/general/user/ap5625/home/miniforge3/envs/perturbgen/lib/python3.11/site-packages/pytorch_lightning/utilities/data.py:105: Total length of `list` across ranks is zero. Please make sure this was your intention.
+Epoch 9, global step 14270: 'train/perplexity' reached 126.06511 (best 126.06511), saving model to '/rds/general/project/lms-scott-raw/live/Ada/perturbation_modeling/T_perturb/res_hvg/checkpoints/20260626_1513_cellgen_train_masking_lr_0.0001_wd_0.0001_batch_64_ptime_pos_sin_m_pow_tp_1_s_0-epoch=09.ckpt' as top 1
+Epoch 19, global step 28540: 'train/perplexity' reached 97.42712 (best 97.42712), saving model to '/rds/general/project/lms-scott-raw/live/Ada/perturbation_modeling/T_perturb/res_hvg/checkpoints/20260626_1513_cellgen_train_masking_lr_0.0001_wd_0.0001_batch_64_ptime_pos_sin_m_pow_tp_1_s_0-epoch=19.ckpt' as top 2
+`Trainer.fit` stopped: `max_epochs=20` reached.

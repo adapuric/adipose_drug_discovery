@@ -1,0 +1,10 @@
+/var/spool/pbs/mom_priv/jobs/3229968.pbs-7.SC: line 7: 2610266 Illegal instruction     /rds/general/user/ap5625/home/.local/bin/poetry -C /rds/general/project/lms-scott-raw/live/Ada/perturbation_modeling/Perturbgen_clean/Perturbgen run python /rds/general/user/ap5625/home/perturbation_modeling/perturbGEN/full_adipocytes/tokenisation_full_adipocytes.py
+
+====================================
+CPU Time used: 00:00:00
+CPU Percent: 0%
+Memory usage: 0b
+Approx Power usage: 0.0
+Walltime usage: 00:00:23
+
+====================================

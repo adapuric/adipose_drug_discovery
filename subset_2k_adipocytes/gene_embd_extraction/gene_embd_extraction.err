@@ -1,0 +1,25 @@
+Seed set to 42
+/rds/general/user/ap5625/home/miniforge3/envs/perturbgen/lib/python3.11/site-packages/anndata/_core/anndata.py:1758: UserWarning: Observation names are not unique. To make them unique, call `.obs_names_make_unique`.
+  utils.warn_names_duplicates("obs")
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+HPU available: False, using: 0 HPUs
+You are using a CUDA device ('NVIDIA L40S') that has Tensor Cores. To properly utilize them, you should set `torch.set_float32_matmul_precision('medium' | 'high')` which will trade-off precision for performance. For more details, read https://pytorch.org/docs/stable/generated/torch.set_float32_matmul_precision.html#torch.set_float32_matmul_precision
+wandb: WARNING The anonymous setting has no effect and will be removed in a future version.
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: Currently logged in as: ap5625 (ap5625-imperial-college-london) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run 4ueea36r
+wandb: Tracking run with wandb version 0.27.1
+wandb: Run data is saved locally in T_perturb/perturbgen/wandb/wandb/wandb/run-20260612_220304-4ueea36r
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run 20260612_2202_PerturbGen
+wandb: ⭐️ View project at https://wandb.ai/ap5625-imperial-college-london/ttransformer
+wandb: 🚀 View run at https://wandb.ai/ap5625-imperial-college-london/ttransformer/runs/4ueea36r
+wandb: Detected [huggingface_hub.inference] in use.
+wandb: Use W&B Weave for improved LLM call tracing. Install Weave with `pip install weave` then add `import weave` to the top of your script.
+wandb: For more information, check out the docs at: https://weave-docs.wandb.ai
+Restoring states from the checkpoint path at /rds/general/project/lms-scott-raw/live/Ada/perturbation_modeling/T_perturb/res/checkpoints/20260609_0537_cellgen_train_masking_lr_0.0001_wd_0.0001_batch_64_ptime_pos_sin_m_pow_tp_1_s_0-epoch=19.ckpt
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [GPU-3ad35434-1f2d-1d55-72f2-22bf1355fc99]
+Loaded model weights from the checkpoint at /rds/general/project/lms-scott-raw/live/Ada/perturbation_modeling/T_perturb/res/checkpoints/20260609_0537_cellgen_train_masking_lr_0.0001_wd_0.0001_batch_64_ptime_pos_sin_m_pow_tp_1_s_0-epoch=19.ckpt
+/rds/general/user/ap5625/home/miniforge3/envs/perturbgen/lib/python3.11/site-packages/anndata/_core/aligned_df.py:68: ImplicitModificationWarning: Transforming to str index.
+  warnings.warn("Transforming to str index.", ImplicitModificationWarning)

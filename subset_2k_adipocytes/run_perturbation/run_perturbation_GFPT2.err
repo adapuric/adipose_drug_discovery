@@ -1,0 +1,58 @@
+Seed set to 42
+Using 16bit Automatic Mixed Precision (AMP)
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+HPU available: False, using: 0 HPUs
+You are using a CUDA device ('NVIDIA L40S') that has Tensor Cores. To properly utilize them, you should set `torch.set_float32_matmul_precision('medium' | 'high')` which will trade-off precision for performance. For more details, read https://pytorch.org/docs/stable/generated/torch.set_float32_matmul_precision.html#torch.set_float32_matmul_precision
+Restoring states from the checkpoint path at /rds/general/project/lms-scott-raw/live/Ada/perturbation_modeling/T_perturb/res/count/checkpoints/20260609_1327_cellgen_train_count_lr_0.001_wd_0.001_batch_16_drop_0.1_zinb_tp_1_s_0_pos_time_pos_sin_m_cosine-epoch=14.ckpt
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [GPU-dfb60cdf-4649-28a1-c2ad-2db9e71f854b]
+Loaded model weights from the checkpoint at /rds/general/project/lms-scott-raw/live/Ada/perturbation_modeling/T_perturb/res/count/checkpoints/20260609_1327_cellgen_train_count_lr_0.001_wd_0.001_batch_16_drop_0.1_zinb_tp_1_s_0_pos_time_pos_sin_m_cosine-epoch=14.ckpt
+/rds/general/user/ap5625/home/miniforge3/envs/perturbgen/lib/python3.11/site-packages/anndata/_core/aligned_df.py:68: ImplicitModificationWarning: Transforming to str index.
+  warnings.warn("Transforming to str index.", ImplicitModificationWarning)
+Traceback (most recent call last):
+  File "/rds/general/user/ap5625/home/perturbation_modeling/perturbGEN/subset_2k_adipocytes/perturb_val_adipocytes.py", line 286, in <module>
+    main()
+  File "/rds/general/user/ap5625/home/perturbation_modeling/perturbGEN/subset_2k_adipocytes/perturb_val_adipocytes.py", line 272, in main
+    trainer.test(
+  File "/rds/general/user/ap5625/home/miniforge3/envs/perturbgen/lib/python3.11/site-packages/pytorch_lightning/trainer/trainer.py", line 748, in test
+    return call._call_and_handle_interrupt(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/rds/general/user/ap5625/home/miniforge3/envs/perturbgen/lib/python3.11/site-packages/pytorch_lightning/trainer/call.py", line 47, in _call_and_handle_interrupt
+    return trainer_fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/rds/general/user/ap5625/home/miniforge3/envs/perturbgen/lib/python3.11/site-packages/pytorch_lightning/trainer/trainer.py", line 788, in _test_impl
+    results = self._run(model, ckpt_path=ckpt_path)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/rds/general/user/ap5625/home/miniforge3/envs/perturbgen/lib/python3.11/site-packages/pytorch_lightning/trainer/trainer.py", line 981, in _run
+    results = self._run_stage()
+              ^^^^^^^^^^^^^^^^^
+  File "/rds/general/user/ap5625/home/miniforge3/envs/perturbgen/lib/python3.11/site-packages/pytorch_lightning/trainer/trainer.py", line 1018, in _run_stage
+    return self._evaluation_loop.run()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/rds/general/user/ap5625/home/miniforge3/envs/perturbgen/lib/python3.11/site-packages/pytorch_lightning/loops/utilities.py", line 178, in _decorator
+    return loop_run(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/rds/general/user/ap5625/home/miniforge3/envs/perturbgen/lib/python3.11/site-packages/pytorch_lightning/loops/evaluation_loop.py", line 142, in run
+    return self.on_run_end()
+           ^^^^^^^^^^^^^^^^^
+  File "/rds/general/user/ap5625/home/miniforge3/envs/perturbgen/lib/python3.11/site-packages/pytorch_lightning/loops/evaluation_loop.py", line 254, in on_run_end
+    self._on_evaluation_epoch_end()
+  File "/rds/general/user/ap5625/home/miniforge3/envs/perturbgen/lib/python3.11/site-packages/pytorch_lightning/loops/evaluation_loop.py", line 334, in _on_evaluation_epoch_end
+    call._call_lightning_module_hook(trainer, hook_name)
+  File "/rds/general/user/ap5625/home/miniforge3/envs/perturbgen/lib/python3.11/site-packages/pytorch_lightning/trainer/call.py", line 167, in _call_lightning_module_hook
+    output = fn(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^
+  File "/rds/general/project/lms-scott-raw/live/Ada/perturbation_modeling/Perturbgen/perturbgen/Perturb/trainer.py", line 702, in on_test_epoch_end
+    return_perturbation_adata(
+  File "/rds/general/project/lms-scott-raw/live/Ada/perturbation_modeling/Perturbgen/perturbgen/src/utils.py", line 993, in return_perturbation_adata
+    adata.X = pert_counts
+    ^^^^^^^
+  File "/rds/general/user/ap5625/home/miniforge3/envs/perturbgen/lib/python3.11/site-packages/anndata/_core/anndata.py", line 654, in X
+    raise ValueError(
+ValueError: Data matrix has wrong shape (58, 1974), need to be (58, 1462).
+Traceback (most recent call last):
+  File "/rds/general/user/ap5625/home/perturbation_modeling/perturbGEN/subset_2k_adipocytes/run_perturbation_GFPT2.py", line 16, in <module>
+    subprocess.run(cmd, check=True)
+  File "/rds/general/user/ap5625/home/miniforge3/envs/perturbgen/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['python', '/rds/general/user/ap5625/home/perturbation_modeling/perturbGEN/subset_2k_adipocytes/perturb_val_adipocytes.py', '--config', '/rds/general/user/ap5625/home/perturbation_modeling/perturbGEN/subset_2k_adipocytes/perturbation_adipocytes_GFPT2.yaml']' returned non-zero exit status 1.

@@ -1,0 +1,22 @@
+#!/bin/bash
+#PBS -l walltime=24:00:00
+#PBS -l select=1:ncpus=16:mem=32gb:ngpus=1
+#PBS -q v1_gpu72
+#PBS -N gene_embd_extraction_hvg
+#PBS -o gene_embd_extraction_hvg.out
+#PBS -e gene_embd_extraction_hvg.err
+
+eval "$(~/miniforge3/bin/conda shell.bash hook)"
+conda activate perturbgen
+module load OpenMPI/4.1.6-GCC-13.2.0
+
+export WANDB_API_KEY="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"
+export WANDB_PROJECT="perturbgen_hvg_adipocytes"
+
+find /rds/general/project/lms-scott-raw/live/Ada/perturbation_modeling/ -name ".DS_Store" -delete
+
+cd /rds/general/user/ap5625/home/perturbation_modeling/perturbGEN/adipocytes_HVG/gene_embd_extraction
+
+python gene_embd_extraction_hvg_adipocytes.py
+
+
