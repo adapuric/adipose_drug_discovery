@@ -39,6 +39,13 @@ pg_results/<run_name>/
 
 PerturbGen creates tokenized data in `tokenized_data/<run_name>` beneath its
 native sibling directory.
+
+Set `prepare.subset_to_highly_variable_genes` to `true` to retain genes marked
+`true` in the source H5AD column named by
+`prepare.highly_variable_gene_col`. This uses the existing gene annotation; it
+does not recalculate highly variable genes. Use a distinct `run.run_name` when
+switching between full-gene and highly-variable-gene inputs.
+
 Checkpoint paths can be written into `config.yaml` or passed with
 `--checkpoint`; the command-line value takes precedence.
 

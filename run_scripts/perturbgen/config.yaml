@@ -2,13 +2,15 @@ project:
   perturbgen_directory: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/Perturbgen
 
 run:
-  run_name: adipocytes_obese_weightloss
+  run_name: adipocytes_obese_weightloss_hvg
   results_root_directory: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/pg_results
 
 prepare:
   source_h5ad_path: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/data/adipocytes_annotated_step2.h5ad
   gene_annotation_path: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/data/mart_export.txt
   raw_count_layer: raw
+  subset_to_highly_variable_genes: true
+  highly_variable_gene_col: highly_variable
   donor_col: Donor
   condition_col: condition
   source_state_col: cell_state_t2d

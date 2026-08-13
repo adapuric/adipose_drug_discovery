@@ -32,6 +32,8 @@ class PrepareConfig:
     source_h5ad_path: Path
     gene_annotation_path: Path
     raw_count_layer: str
+    subset_to_highly_variable_genes: bool
+    highly_variable_gene_col: str
     donor_col: str
     condition_col: str
     source_state_col: str

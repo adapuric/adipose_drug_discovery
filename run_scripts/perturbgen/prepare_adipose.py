@@ -28,6 +28,8 @@ def prepare_adipose_adata(config: PerturbGenConfig) -> Path:
 
     # Select paired donors without copying the complete AnnData
     selected, paired_donors = _select_paired_donors(adata, settings)
+    if settings.subset_to_highly_variable_genes:
+        selected = _select_highly_variable_genes(selected, settings)
     raw_counts = cast(
         np.ndarray | sparse.csr_matrix,
         selected.layers[settings.raw_count_layer],
@@ -132,6 +134,30 @@ def _select_paired_donors(
     selected = cast(ad.AnnData, adata[keep_cells])
 
     return selected, paired_donors
+
+
+def _select_highly_variable_genes(
+    adata: ad.AnnData,
+    settings: PrepareConfig,
+) -> ad.AnnData:
+    """Subset to genes marked highly variable in the source H5AD."""
+    column = settings.highly_variable_gene_col
+    adata_var = cast(pd.DataFrame, adata.var)
+    if column not in adata_var:
+        raise KeyError(f"Adipose H5AD is missing var column {column!r}.")
+
+    highly_variable = adata_var[column]
+    if highly_variable.isna().to_numpy().any():
+        raise ValueError(
+            f"Gene-selection column {column!r} contains missing values."
+        )
+    if not pd.api.types.is_bool_dtype(highly_variable.dtype):
+        raise TypeError(f"Gene-selection column {column!r} must be boolean.")
+
+    keep_genes = highly_variable.to_numpy(dtype=bool)
+    if not keep_genes.any():
+        raise ValueError(f"Gene-selection column {column!r} selects no genes.")
+    return cast(ad.AnnData, adata[:, keep_genes])
 
 
 def _map_genes(
