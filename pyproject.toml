@@ -16,17 +16,17 @@ classifiers = [
 ]
 
 dependencies = [
-  "anndata==0.12.7",
+  "anndata==0.12.19",
   "h5py==3.16.0",
-  "matplotlib==3.10.9",
+  "matplotlib==3.11.1",
   "numpy==2.4.6",
   "pandas==2.3.3",
   "patsy==1.0.2",
   "pylimma==0.1.0",
-  "pyarrow==24.0.0",
+  "pyarrow==25.0.1",
   "psutil==7.2.2",
   "PyYAML==6.0.3",
-  "scikit-learn==1.8.0",
+  "scikit-learn==1.9.0",
   "scipy==1.17.1",
   "statsmodels==0.14.6",
 ]
@@ -34,12 +34,12 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "ipykernel==7.3.0",
-  "ipython==8.12.3",
-  "pre-commit",
-  "pyright[nodejs]==1.1.410",
-  "pytest==9.1.0",
-  "pytest-cov",
-  "ruff==0.15.17",
+  "ipython==9.16.1",
+  "pre-commit==4.6.2",
+  "pyright[nodejs]==1.1.411",
+  "pytest==9.1.1",
+  "pytest-cov==7.1.0",
+  "ruff==0.16.3",
 ]
 
 [project.scripts]
