@@ -1,6 +1,6 @@
 #!/bin/bash
 #PBS -N train_masking_model_subset
-#PBS -l select=1:ncpus=8:mem=240gb:ngpus=1
+#PBS -l select=1:ncpus=8:mem=64gb:ngpus=1:gpu_type=L40S
 #PBS -l walltime=72:00:00
 #PBS -q v1_gpu72
 #PBS -m a
