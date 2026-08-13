@@ -23,7 +23,7 @@ adipose H5AD as a Tahoe shard.
 To download the required drug-database files, run:
 
 ```bash
-qsub run_scripts/baselines/pbs/download_data.pbs
+qsub adipose_drug_discovery/run_scripts/baselines/pbs/download_data.pbs
 ```
 
 See [`download_data.pbs`](run_scripts/baselines/pbs/download_data.pbs) for the

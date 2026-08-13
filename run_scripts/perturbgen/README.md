@@ -47,16 +47,16 @@ Checkpoint paths can be written into `config.yaml` or passed with
 ## PBS submission
 
 ```bash
-qsub run_scripts/perturbgen/pbs/prepare_and_tokenize.pbs
-qsub run_scripts/perturbgen/pbs/train_masking_model_subset.pbs
+qsub adipose_drug_discovery/run_scripts/perturbgen/pbs/prepare_and_tokenize.pbs
+qsub adipose_drug_discovery/run_scripts/perturbgen/pbs/train_masking_model_subset.pbs
 
 # Replace this with the masking checkpoint selected from the preceding job.
 MASKING_CHECKPOINT=/path/to/masking.ckpt
 
 qsub -v MASKING_CHECKPOINT="${MASKING_CHECKPOINT}" \
-  run_scripts/perturbgen/pbs/train_count_decoder.pbs
+  adipose_drug_discovery/run_scripts/perturbgen/pbs/train_count_decoder.pbs
 qsub -v MASKING_CHECKPOINT="${MASKING_CHECKPOINT}" \
-  run_scripts/perturbgen/pbs/gene_embd_extraction_subset.pbs
+  adipose_drug_discovery/run_scripts/perturbgen/pbs/gene_embd_extraction_subset.pbs
 ```
 
 Decoder training and embedding extraction both use the masking checkpoint, so
