@@ -52,10 +52,10 @@ run_stage() {
   local stage_name="$1"
   shift
 
-  printf 'Stage: %s\n' "${stage_name}"
+  printf '\nStage: %s\n' "${stage_name}"
   printf 'Command:'
   printf ' %q' "$@"
-  printf '\n'
+  printf '\n\n'
   "$@"
 }
 
@@ -112,7 +112,7 @@ main() {
   printf 'Config: %s\n' "${CONFIG_PATH}"
   printf 'Masking checkpoint: %s\n' "${MASKING_CHECKPOINT}"
   run_stage "extract PerturbGen embeddings" "${command[@]}"
-  printf 'Job finished: %s\n' "$(date -Is)"
+  printf '\nJob finished: %s\n' "$(date -Is)"
 }
 
 main "$@"
