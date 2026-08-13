@@ -12,7 +12,7 @@ def test_get_physical_cores_respects_pbs_allocation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Worker count stays within the CPUs allocated by PBS."""
-    monkeypatch.setenv("PBS_NCPUS", "18")
+    monkeypatch.setenv("NCPUS", "18")
     monkeypatch.setattr(psutil, "cpu_count", lambda *, logical: 128)
 
     assert get_physical_cores() == 17
