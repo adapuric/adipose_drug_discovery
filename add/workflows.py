@@ -1051,7 +1051,7 @@ def _top_candidate_series(
     if pd.isna(top.get("drug")):
         return None
     drug = str(top["drug"])
-    positions = np.arange(len(signatures.meta))
+    positions: np.ndarray = np.arange(len(signatures.meta))
 
     if context_scores is not None and "signature_id" in context_scores:
         numeric_context_scores = cast(
