@@ -9,8 +9,9 @@
 
 # Train the PerturbGen masking model from existing tokenized data.
 #
-# Submit from the repository root:
-#   qsub run_scripts/perturbgen/pbs/train_masking_model_subset.pbs
+# Submit from the repository root with a workflow config:
+#   qsub -v CONFIG_PATH=/path/to/config.yaml \
+#     run_scripts/perturbgen/pbs/train_masking_model_subset.pbs
 
 set -o errexit
 set -o nounset

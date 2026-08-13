@@ -9,8 +9,9 @@
 
 # Extract PerturbGen gene/cell embeddings from a selected masking checkpoint.
 #
-# Submit from the repository root with an existing masking checkpoint:
-#   qsub -v MASKING_CHECKPOINT=/path/to/masking.ckpt \
+# Submit with a workflow config and existing masking checkpoint:
+#   qsub \
+#     -v CONFIG_PATH=/path/to/config.yaml,MASKING_CHECKPOINT=/path/to/masking.ckpt \
 #     run_scripts/perturbgen/pbs/gene_embd_extraction_subset.pbs
 
 set -o errexit

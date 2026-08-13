@@ -9,8 +9,9 @@
 
 # Train the count decoder from a selected masking-model checkpoint.
 #
-# Submit from the repository root with an existing masking checkpoint:
-#   qsub -v MASKING_CHECKPOINT=/path/to/masking.ckpt \
+# Submit with a workflow config and existing masking checkpoint:
+#   qsub \
+#     -v CONFIG_PATH=/path/to/config.yaml,MASKING_CHECKPOINT=/path/to/masking.ckpt \
 #     run_scripts/perturbgen/pbs/train_count_decoder.pbs
 
 set -o errexit

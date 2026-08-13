@@ -8,8 +8,9 @@
 
 # Prepare the paired adipocyte H5AD and tokenize it for PerturbGen.
 #
-# Submit from the repository root:
-#   qsub run_scripts/perturbgen/pbs/prepare_and_tokenize.pbs
+# Submit from the repository root with a workflow config:
+#   qsub -v CONFIG_PATH=/path/to/config.yaml \
+#     run_scripts/perturbgen/pbs/prepare_and_tokenize.pbs
 
 set -o errexit
 set -o nounset
