@@ -1,0 +1,102 @@
+#!/bin/bash
+#PBS -N train_masking_model_subset
+#PBS -l select=1:ncpus=8:mem=240gb:ngpus=1
+#PBS -l walltime=72:00:00
+#PBS -q v1_gpu72
+#PBS -m a
+#PBS -j oe
+#PBS -o /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/job_out
+
+# Train the PerturbGen masking model from existing tokenized data.
+#
+# Submit from the repository root:
+#   qsub run_scripts/perturbgen/pbs/train_masking_model_subset.pbs
+
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# Paths
+ROOT="/rds/general/user/sho3/projects/lms-scott-raw/live/steve"
+PROJECT_DIR="${ROOT}/add"
+REPO_DIR="${PROJECT_DIR}/adipose_drug_discovery"
+CONFIG_PATH="${CONFIG_PATH:-${REPO_DIR}/run_scripts/perturbgen/config.yaml}"
+
+# Conda and modules
+CONDA_BASE="${ROOT}/software/conda/base"
+CONDA_ENV="${ROOT}/software/envs/perturbgen"
+OPENMPI_MODULE="${OPENMPI_MODULE:-OpenMPI/4.1.6-GCC-13.2.0}"
+
+# PBS logging
+PBS_COMMON="/rds/general/user/sho3/home/pbs_common.sh"
+LOG_DIR="${PROJECT_DIR}/job_out"
+JOB_NAME="${PBS_JOBNAME:-train_masking_model_subset}"
+JOB_ID="${PBS_JOBID:-local}"
+LIVE_LOG="${LOG_DIR}/${JOB_NAME}.${JOB_ID}.live.log"
+
+#######################################
+# Print and run one workflow stage.
+# Arguments:
+#   $1: Human-readable stage name.
+#   Remaining arguments: Command and arguments to execute.
+# Outputs:
+#   Writes the stage name and shell-escaped command to stdout.
+# Returns:
+#   The executed command's exit status.
+#######################################
+run_stage() {
+  local stage_name="$1"
+  shift
+
+  printf 'Stage: %s\n' "${stage_name}"
+  printf 'Command:'
+  printf ' %q' "$@"
+  printf '\n'
+  "$@"
+}
+
+#######################################
+# Validate settings, activate PerturbGen, and train the masking model.
+# Outputs:
+#   Writes job context and training output to stdout and stderr.
+# Returns:
+#   0 on success; 2 for invalid job settings; otherwise the failing command's
+#   exit status.
+#######################################
+main() {
+  local command=(
+    python -u -m run_scripts.perturbgen.train_masking
+    --config "${CONFIG_PATH}"
+  )
+
+  if [[ ! -d "${REPO_DIR}" ]]; then
+    printf 'ERROR: repository directory does not exist: %s\n' \
+      "${REPO_DIR}" >&2
+    return 2
+  fi
+  if [[ ! -f "${CONFIG_PATH}" ]]; then
+    printf 'ERROR: PerturbGen config does not exist: %s\n' \
+      "${CONFIG_PATH}" >&2
+    return 2
+  fi
+  if [[ ! -f "${PBS_COMMON}" ]]; then
+    printf 'ERROR: PBS helper does not exist: %s\n' "${PBS_COMMON}" >&2
+    return 2
+  fi
+
+  mkdir -p "${LOG_DIR}"
+  source "${PBS_COMMON}"
+  pbs::setup_logging "${LIVE_LOG}"
+  pbs::activate_conda_environment "${CONDA_BASE}" "${CONDA_ENV}"
+  pbs::log_job_context "${JOB_ID}" "${PROJECT_DIR}" "${LIVE_LOG}"
+
+  module load "${OPENMPI_MODULE}"
+  cd "${REPO_DIR}"
+  export PYTHONUNBUFFERED=1
+
+  printf 'Config: %s\n' "${CONFIG_PATH}"
+  run_stage "train PerturbGen masking model" "${command[@]}"
+  printf 'Job finished: %s\n' "$(date -Is)"
+}
+
+main "$@"

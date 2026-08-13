@@ -1,0 +1,21 @@
+#!/bin/bash
+#PBS -l walltime=72:00:00
+#PBS -l select=1:ncpus=8:mem=240gb:ngpus=1
+#PBS -q v1_gpu72
+#PBS -N train_masking_model_full_adipocytes
+
+module load Python/3.11.5-GCCcore-13.2.0
+export MKL_ENABLE_INSTRUCTIONS=AVX2
+
+
+
+# added this - update if i use a new API key 
+# Supply WANDB_API_KEY through the job environment when logging online.
+export WANDB_PROJECT="perturbgen_fulladipocytes"
+
+# Remove DS_Store files before training
+find /rds/general/project/lms-scott-raw/live/Ada/perturbation_modeling/ -name ".DS_Store" -delete
+
+/rds/general/user/ap5625/home/.local/bin/poetry -C /rds/general/project/lms-scott-raw/live/Ada/perturbation_modeling/Perturbgen_clean/Perturbgen run python /rds/general/user/ap5625/home/perturbation_modeling/perturbGEN/full_adipocytes/train_masking_model/train_masking_model_full_adipocytes.py
+
+

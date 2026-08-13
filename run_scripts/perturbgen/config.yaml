@@ -1,0 +1,108 @@
+project:
+  perturbgen_directory: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/Perturbgen
+
+run:
+  run_name: adipocytes_obese_weightloss
+  results_root_directory: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/pg_results
+
+prepare:
+  source_h5ad_path: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/data/adipocytes_annotated_step2.h5ad
+  gene_annotation_path: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/data/mart_export.txt
+  raw_count_layer: raw
+  donor_col: Donor
+  condition_col: condition
+  source_state_col: cell_state_t2d
+  state_alias_col: cell_states_adipocytes
+  source_baseline_label: baseline
+  source_weightloss_label: weightloss
+  prepared_baseline_label: obese
+  annotation_gene_symbol_col: Gene name
+  annotation_ensembl_col: Gene stable ID
+
+tokenize:
+  gene_filtering_mode: all
+  hvg_mode: before_tokenisation
+  retained_obs_cols:
+    - cell_states_adipocytes
+    - condition
+    - Donor
+  pairing_mode: stratified
+  time_obs_col: condition
+  main_pairing_obs: Donor
+  optional_pairing_obs: []
+  reference_time: obese
+  time_point_order:
+    - obese
+    - weightloss
+  gene_median_dictionary_path: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/data/gene_median_dict_gftokens_gc95M.pkl
+  token_dictionary_path: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/data/token_dict_gftokens_gc95M.pkl
+  ensembl_mapping_path: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/data/ensembl_mapping_dict_gc95M.pkl
+
+model:
+  encoder: scmaskgit
+  encoder_checkpoint_path: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/data/perturbgen_encoder.ckpt
+  predicted_time_points:
+    - 1
+  retained_obs_cols:
+    - cell_states_adipocytes
+    - condition
+    - Donor
+  conditioning_obs_cols:
+    - cell_states_adipocytes
+  context_mode: true
+  positional_encoding_mode: time_pos_sin
+  model_dimension: 768
+  transformer_layers: 6
+  feedforward_dimension: 32
+  num_nodes: 1
+  random_seed: 42
+
+masking:
+  batch_size: 64
+  epochs: 20
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  data_loader_workers: 4
+  mask_scheduler: pow
+  use_weighted_sampler: false
+  checkpoint_interval_epochs: 2
+  resume_checkpoint_path: null
+
+decoder:
+  masking_checkpoint_path: null
+  batch_size: 16
+  epochs: 16
+  count_learning_rate: 0.001
+  count_weight_decay: 0.001
+  masking_learning_rate: 0.0001
+  masking_weight_decay: 0.0001
+  masking_probability: 0.30
+  count_dropout: 0.1
+  data_loader_workers: 16
+  loss_mode: zinb
+  mask_scheduler: cosine
+  use_positional_encoding: false
+  use_layer_normalization: true
+  checkpoint_interval_epochs: 5
+
+embedding:
+  masking_checkpoint_path: null
+  retained_obs_cols:
+    - cell_pairing_index
+    - cell_states_adipocytes
+    - condition
+  batch_size: 64
+  data_loader_workers: 16
+  return_cell_embeddings: true
+  return_attention: false
+  generate: false
+  return_gene_embeddings: true
+  gene_embedding_condition_obs: condition
+  masking_learning_rate: 0.0001
+  masking_weight_decay: 0.0001
+  count_learning_rate: 0.001
+  count_weight_decay: 0.001
+  mask_scheduler: pow
+
+perturbation:
+  native_config_path: null

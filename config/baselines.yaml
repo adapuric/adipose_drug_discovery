@@ -1,0 +1,68 @@
+adipose_path: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/data/adipocytes_annotated_step2.h5ad
+output_path: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/baselines
+count_layer: raw
+
+condition_col: condition
+donor_col: Donor
+state_col: cell_state_t2d
+baseline_label: baseline
+weightloss_label: weightloss
+lean_label: Lean
+unassigned_label: Unassigned
+
+min_cells: 20
+random_seed: 42
+metadata_cols:
+  - BMI
+  - sex
+  - Age
+  - study
+  - sample
+  - Chemistry
+
+tahoe:
+  input_path: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/data/tahoe
+  processed_prefix: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/baselines/perturb/tahoe_signatures
+  count_layer: null
+  drug_col: drug
+  vehicle_label: DMSO_TF
+  context_cols:
+    - cell_line
+    - plate
+  sample_col: sample
+  dose_col: null
+  time_col: null
+  target_col: null
+  mechanism_col: null
+  chunk_size: 4096
+
+lincs:
+  matrix_path: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/data/GSE70138_Broad_LINCS_Level5_COMPZ_n118050x12328_2017-03-06.gctx
+  metadata_path: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/data/GSE70138_Broad_LINCS_sig_info_2017-03-06.txt
+  gene_metadata_path: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/data/GSE70138_Broad_LINCS_gene_info_2017-03-06.txt
+  processed_prefix: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/baselines/perturb/lincs_signatures
+  signature_id_col: sig_id
+  drug_col: pert_iname
+  cell_line_col: cell_id
+  dose_col: pert_idose
+  time_col: pert_itime
+  target_col: null
+  mechanism_col: null
+  quality_col: null
+  gene_id_col: pr_gene_id
+  gene_col: pr_gene_symbol
+  landmark_col: pr_is_lm
+  perturbation_type_col: pert_type
+  compound_type: trt_cp
+  chunk_size: 4096
+
+gene_selection:
+  max_model_genes: 2000
+  minimum_shared_genes: 50
+  cmap_query_genes: 150
+  cmap_minimum_query_genes: 10
+
+pca_ridge:
+  n_components: 30
+  ridge_alpha: 10.0
+  test_fraction: 0.2

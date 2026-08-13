@@ -1,0 +1,132 @@
+#!/bin/bash
+#PBS -N download_baseline_data
+#PBS -l select=1:ncpus=2:mem=8gb
+#PBS -l walltime=72:00:00
+#PBS -m a
+#PBS -j oe
+#PBS -o /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/job_out
+
+# Download all Tahoe-100M plates and the LINCS files used by the baselines.
+#
+# Submit from the repository root:
+#   qsub run_scripts/baselines/pbs/download_data.pbs
+
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# Paths
+ROOT="/rds/general/user/sho3/projects/lms-scott-raw/live/steve"
+PROJECT_DIR="${ROOT}/add"
+DATA_DIR="${PROJECT_DIR}/data"
+TAHOE_DIR="${DATA_DIR}/tahoe"
+
+# PBS logging
+PBS_COMMON="/rds/general/user/sho3/home/pbs_common.sh"
+LOG_DIR="${PROJECT_DIR}/job_out"
+JOB_NAME="${PBS_JOBNAME:-download_baseline_data}"
+JOB_ID="${PBS_JOBID:-local}"
+LIVE_LOG="${LOG_DIR}/${JOB_NAME}.${JOB_ID}.live.log"
+
+#######################################
+# Print and run one download stage.
+# Arguments:
+#   $1: Human-readable stage name.
+#   Remaining arguments: Command and arguments to execute.
+# Outputs:
+#   Writes the stage name and shell-escaped command to stdout.
+# Returns:
+#   The executed command's exit status.
+#######################################
+run_stage() {
+  local stage_name="$1"
+  shift
+
+  printf 'Stage: %s\n' "${stage_name}"
+  printf 'Command:'
+  printf ' %q' "$@"
+  printf '\n'
+  "$@"
+}
+
+#######################################
+# Decompress one LINCS archive unless its output already exists.
+# Arguments:
+#   $1: Path to a gzip archive.
+# Outputs:
+#   Writes decompression or skip status to stdout.
+# Returns:
+#   The gzip command's exit status.
+#######################################
+decompress_archive() {
+  local archive="$1"
+  local output="${archive%.gz}"
+
+  if [[ -f "${output}" ]]; then
+    printf 'Already decompressed: %s\n' "${output}"
+    return
+  fi
+  run_stage "decompress $(basename "${archive}")" \
+    gzip --decompress --keep "${archive}"
+}
+
+#######################################
+# Validate tools, initialize logging, and download baseline data.
+# Outputs:
+#   Writes job context and download progress to stdout and stderr.
+# Returns:
+#   0 on success; 2 for invalid job settings; otherwise the failing command's
+#   exit status.
+#######################################
+main() {
+  local archive=""
+  local downloads=(
+    "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE70nnn/GSE70138/suppl/GSE70138_Broad_LINCS_Level5_COMPZ_n118050x12328_2017-03-06.gctx.gz"
+    "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE70nnn/GSE70138/suppl/GSE70138_Broad_LINCS_sig_info_2017-03-06.txt.gz"
+    "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE70nnn/GSE70138/suppl/GSE70138_Broad_LINCS_gene_info_2017-03-06.txt.gz"
+  )
+  local lincs_archives=()
+  local plate=""
+  local tahoe_downloads=()
+
+  if [[ ! -f "${PBS_COMMON}" ]]; then
+    printf 'ERROR: PBS helper does not exist: %s\n' "${PBS_COMMON}" >&2
+    return 2
+  fi
+  if ! command -v wget >/dev/null; then
+    printf 'ERROR: wget is required to download baseline data\n' >&2
+    return 2
+  fi
+  if ! command -v gzip >/dev/null; then
+    printf 'ERROR: gzip is required to decompress LINCS data\n' >&2
+    return 2
+  fi
+
+  for plate in {1..14}; do
+    tahoe_downloads+=(
+      "https://storage.googleapis.com/arc-institute-virtual-cell-atlas/tahoe100M/2025-02-25/h5ad/plate${plate}_filt_Vevo_Tahoe100M_WServicesFrom_ParseGigalab.h5ad"
+    )
+  done
+
+  mkdir -p "${LOG_DIR}" "${DATA_DIR}" "${TAHOE_DIR}"
+  source "${PBS_COMMON}"
+  pbs::setup_logging "${LIVE_LOG}"
+  pbs::log_job_context "${JOB_ID}" "${PROJECT_DIR}" "${LIVE_LOG}"
+
+  printf 'Tahoe directory: %s\n' "${TAHOE_DIR}"
+  printf 'LINCS directory: %s\n' "${DATA_DIR}"
+  run_stage "download Tahoe-100M plates" \
+    wget --continue --directory-prefix "${TAHOE_DIR}" \
+    "${tahoe_downloads[@]}"
+  run_stage "download LINCS files" \
+    wget --continue --directory-prefix "${DATA_DIR}" "${downloads[@]}"
+
+  lincs_archives=("${DATA_DIR}"/GSE70138_Broad_LINCS_*.gz)
+  for archive in "${lincs_archives[@]}"; do
+    decompress_archive "${archive}"
+  done
+
+  printf 'Job finished: %s\n' "$(date -Is)"
+}
+
+main "$@"

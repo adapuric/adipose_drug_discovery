@@ -1,0 +1,404 @@
+"""Typed configuration for the PerturbGen workflow."""
+
+from __future__ import annotations
+
+import dataclasses
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+from typing import TypeVar, cast, get_type_hints
+
+import yaml  # type: ignore[import]
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class ProjectConfig:
+    """PerturbGen checkout location."""
+
+    perturbgen_directory: Path
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class RunConfig:
+    """Run identity and results location."""
+
+    run_name: str
+    results_root_directory: Path
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class PrepareConfig:
+    """Adipocyte preparation inputs, schema, and labels."""
+
+    source_h5ad_path: Path
+    gene_annotation_path: Path
+    raw_count_layer: str
+    donor_col: str
+    condition_col: str
+    source_state_col: str
+    state_alias_col: str
+    source_baseline_label: str
+    source_weightloss_label: str
+    prepared_baseline_label: str
+    annotation_gene_symbol_col: str
+    annotation_ensembl_col: str
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class TokenizeConfig:
+    """PerturbGen tokenization and pairing settings."""
+
+    gene_filtering_mode: str
+    hvg_mode: str
+    retained_obs_cols: tuple[str, ...]
+    pairing_mode: str
+    time_obs_col: str
+    main_pairing_obs: str
+    optional_pairing_obs: tuple[str, ...] = dataclasses.field(
+        metadata={"allow_empty": True}
+    )
+    reference_time: str
+    time_point_order: tuple[str, ...]
+    gene_median_dictionary_path: Path
+    token_dictionary_path: Path
+    ensembl_mapping_path: Path
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class ModelConfig:
+    """Architecture and conditioning shared across model stages."""
+
+    encoder: str
+    encoder_checkpoint_path: Path
+    predicted_time_points: tuple[str, ...]
+    retained_obs_cols: tuple[str, ...]
+    conditioning_obs_cols: tuple[str, ...] = dataclasses.field(
+        metadata={"allow_empty": True}
+    )
+    context_mode: bool
+    positional_encoding_mode: str
+    model_dimension: int
+    transformer_layers: int
+    feedforward_dimension: int
+    num_nodes: int
+    random_seed: int
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class MaskingConfig:
+    """Masking-model training settings."""
+
+    batch_size: int
+    epochs: int
+    learning_rate: float
+    weight_decay: float
+    data_loader_workers: int
+    mask_scheduler: str
+    use_weighted_sampler: bool
+    checkpoint_interval_epochs: int
+    resume_checkpoint_path: Path | None
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class DecoderConfig:
+    """Count-decoder training settings."""
+
+    masking_checkpoint_path: Path | None
+    batch_size: int
+    epochs: int
+    count_learning_rate: float
+    count_weight_decay: float
+    masking_learning_rate: float
+    masking_weight_decay: float
+    masking_probability: float
+    count_dropout: float
+    data_loader_workers: int
+    loss_mode: str
+    mask_scheduler: str
+    use_positional_encoding: bool
+    use_layer_normalization: bool
+    checkpoint_interval_epochs: int
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class EmbeddingConfig:
+    """Embedding-extraction settings."""
+
+    masking_checkpoint_path: Path | None
+    retained_obs_cols: tuple[str, ...]
+    batch_size: int
+    data_loader_workers: int
+    return_cell_embeddings: bool
+    return_attention: bool
+    generate: bool
+    return_gene_embeddings: bool
+    gene_embedding_condition_obs: str
+    masking_learning_rate: float
+    masking_weight_decay: float
+    count_learning_rate: float
+    count_weight_decay: float
+    mask_scheduler: str
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class PerturbationConfig:
+    """Native PerturbGen inference configuration."""
+
+    native_config_path: Path | None
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class PerturbGenConfig:
+    """Resolved configuration for every active PerturbGen stage."""
+
+    project: ProjectConfig
+    run: RunConfig
+    prepare: PrepareConfig
+    tokenize: TokenizeConfig
+    model: ModelConfig
+    masking: MaskingConfig
+    decoder: DecoderConfig
+    embedding: EmbeddingConfig
+    perturbation: PerturbationConfig
+
+    @property
+    def run_directory(self) -> Path:
+        """Directory containing outputs for this configured run."""
+        return self.run.results_root_directory / self.run.run_name
+
+    @property
+    def output_h5ad_path(self) -> Path:
+        """Prepared H5AD written for tokenization."""
+        return self.run_directory / "prepared_adipocytes.h5ad"
+
+    @property
+    def tokenized_data_directory(self) -> Path:
+        """PerturbGen's native tokenized-data directory for this run."""
+        return (
+            self.project.perturbgen_directory.parent
+            / "T_perturb"
+            / "tokenized_data"
+            / self.run.run_name
+        )
+
+    @property
+    def source_token_dataset_path(self) -> Path:
+        """Reference-condition token dataset generated by PerturbGen."""
+        return (
+            self.tokenized_data_directory
+            / "dataset_all_src"
+            / f"{self.tokenize.reference_time}.dataset"
+        )
+
+    @property
+    def target_token_dataset_directory(self) -> Path:
+        """Target-condition token datasets generated by PerturbGen."""
+        return self.tokenized_data_directory / "dataset_all_tgt"
+
+    @property
+    def source_pairing_h5ad_path(self) -> Path:
+        """Reference-condition pairing H5AD generated by PerturbGen."""
+        return (
+            self.tokenized_data_directory
+            / "h5ad_pairing_all_src"
+            / f"{self.tokenize.reference_time}.h5ad"
+        )
+
+    @property
+    def target_pairing_h5ad_directory(self) -> Path:
+        """Target-condition pairing H5ADs generated by PerturbGen."""
+        return self.tokenized_data_directory / "h5ad_pairing_all_tgt"
+
+    @property
+    def token_to_gene_mapping_path(self) -> Path:
+        """Token-to-gene mapping generated by PerturbGen."""
+        return self.tokenized_data_directory / "token_id_to_genename_all.pkl"
+
+    @property
+    def token_to_row_mapping_path(self) -> Path:
+        """Token-to-row mapping generated by PerturbGen."""
+        return self.tokenized_data_directory / "tokenid_to_rowid_all.pkl"
+
+    @property
+    def masking_output_directory(self) -> Path:
+        """Masking-model output directory for this run."""
+        return self.run_directory / "masking"
+
+    @property
+    def decoder_output_directory(self) -> Path:
+        """Count-decoder output directory for this run."""
+        return self.run_directory / "decoder"
+
+    @property
+    def embedding_output_directory(self) -> Path:
+        """Embedding output directory for this run."""
+        return self.run_directory / "embeddings"
+
+    @property
+    def perturbation_script_path(self) -> Path:
+        """PerturbGen's native perturbation inference entry point."""
+        return (
+            self.project.perturbgen_directory
+            / "perturbgen"
+            / "Perturb"
+            / "val.py"
+        )
+
+
+def load_perturbgen_config(path: str | Path) -> PerturbGenConfig:
+    """Load and validate a PerturbGen workflow YAML file."""
+    config_path = Path(path).expanduser().resolve()
+    if not config_path.is_file():
+        raise FileNotFoundError(f"PerturbGen config not found: {config_path}")
+    with config_path.open(encoding="utf-8") as handle:
+        loaded = yaml.safe_load(handle)
+    if not isinstance(loaded, Mapping):
+        raise ValueError("PerturbGen config root must be a mapping.")
+    values = cast(Mapping[str, object], loaded)
+
+    return PerturbGenConfig(
+        project=_parse_section(
+            ProjectConfig,
+            _mapping_section(values, "project"),
+            config_path,
+        ),
+        run=_parse_section(
+            RunConfig,
+            _mapping_section(values, "run"),
+            config_path,
+        ),
+        prepare=_parse_section(
+            PrepareConfig,
+            _mapping_section(values, "prepare"),
+            config_path,
+        ),
+        tokenize=_parse_section(
+            TokenizeConfig,
+            _mapping_section(values, "tokenize"),
+            config_path,
+        ),
+        model=_parse_section(
+            ModelConfig,
+            _mapping_section(values, "model"),
+            config_path,
+        ),
+        masking=_parse_section(
+            MaskingConfig,
+            _mapping_section(values, "masking"),
+            config_path,
+        ),
+        decoder=_parse_section(
+            DecoderConfig,
+            _mapping_section(values, "decoder"),
+            config_path,
+        ),
+        embedding=_parse_section(
+            EmbeddingConfig,
+            _mapping_section(values, "embedding"),
+            config_path,
+        ),
+        perturbation=_parse_section(
+            PerturbationConfig,
+            _mapping_section(values, "perturbation"),
+            config_path,
+        ),
+    )
+
+
+def _mapping_section(
+    values: Mapping[str, object],
+    name: str,
+) -> Mapping[str, object]:
+    """Return a required mapping section named `name`."""
+    section = values.get(name)
+    if not isinstance(section, Mapping):
+        raise ValueError(
+            f"PerturbGen config section {name!r} must be a mapping."
+        )
+    return cast(Mapping[str, object], section)
+
+
+SectionConfig = TypeVar("SectionConfig")
+
+
+def _parse_section(
+    section_type: type[SectionConfig],
+    values: Mapping[str, object],
+    config_path: Path,
+) -> SectionConfig:
+    """Validate and construct one typed configuration section."""
+    section_fields = {
+        section_field.name: section_field
+        for section_field in dataclasses.fields(section_type)  # type: ignore[arg-type]
+    }
+    if missing := sorted(set(section_fields).difference(values)):
+        raise ValueError(f"Missing {section_type.__name__} values: {missing}.")
+
+    annotations = get_type_hints(section_type)
+    converted = {
+        name: _convert_value(
+            values[name],
+            expected_type=annotations[name],
+            name=name,
+            config_path=config_path,
+            allow_empty=bool(
+                section_fields[name].metadata.get("allow_empty", False)
+            ),
+        )
+        for name in section_fields
+    }
+    return section_type(**converted)  # type: ignore[arg-type]
+
+
+def _convert_value(
+    value: object,
+    *,
+    expected_type: object,
+    name: str,
+    config_path: Path,
+    allow_empty: bool,
+) -> object:
+    """Validate and normalize a configured scalar, path, or name list."""
+    if expected_type is Path:
+        return _resolve_path(value, name=name, config_path=config_path)
+    if expected_type == Path | None:
+        return (
+            None
+            if value is None
+            else _resolve_path(value, name=name, config_path=config_path)
+        )
+    if expected_type is str:
+        if not isinstance(value, str) or not value:
+            raise ValueError(
+                f"Config value {name!r} must be a non-empty string."
+            )
+        return value
+    if expected_type is bool:
+        if not isinstance(value, bool):
+            raise ValueError(f"Config value {name!r} must be true or false.")
+        return value
+    if expected_type is int:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"Config value {name!r} must be an integer.")
+        return value
+    if expected_type is float:
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise ValueError(f"Config value {name!r} must be numeric.")
+        return float(value)
+    if expected_type == tuple[str, ...]:
+        if isinstance(value, str) or not isinstance(value, Sequence):
+            raise ValueError(f"Config value {name!r} must be a list.")
+        converted = tuple(str(item) for item in cast(Sequence[object], value))
+        if not converted and not allow_empty:
+            raise ValueError(f"Config value {name!r} must not be empty.")
+        return converted
+    raise TypeError(f"Unsupported config type for {name!r}: {expected_type}.")
+
+
+def _resolve_path(value: object, *, name: str, config_path: Path) -> Path:
+    """Resolve a configured path relative to its YAML file."""
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"Config value {name!r} must be a path or null.")
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = config_path.parent / path
+    return path.resolve()

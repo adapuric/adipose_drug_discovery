@@ -1,0 +1,124 @@
+#!/bin/bash
+#PBS -N prepare_adipose_rescue
+#PBS -l select=1:ncpus=4:mem=64gb
+#PBS -l walltime=24:00:00
+#PBS -m a
+#PBS -j oe
+#PBS -o /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/job_out
+
+# Build donor-level pseudobulk profiles and paired rescue vectors.
+#
+# Submit from the repository root:
+#   qsub run_scripts/baselines/pbs/prepare_rescue.pbs
+
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# Paths
+ROOT="/rds/general/user/sho3/projects/lms-scott-raw/live/steve"
+PROJECT_DIR="${ROOT}/add"
+REPO_DIR="${PROJECT_DIR}/adipose_drug_discovery"
+DATA_DIR="${PROJECT_DIR}/data"
+OUTPUT_DIR="${PROJECT_DIR}/baselines"
+CONFIG_PATH="${CONFIG_PATH:-${REPO_DIR}/config/baselines.yaml}"
+ADIPOSE_PATH="${ADIPOSE_PATH:-${DATA_DIR}/adipocytes_annotated_step2.h5ad}"
+
+# Conda
+CONDA_BASE="${ROOT}/software/conda/base"
+CONDA_ENV="${ROOT}/software/envs/add"
+
+# PBS logging
+PBS_COMMON="/rds/general/user/sho3/home/pbs_common.sh"
+LOG_DIR="${PROJECT_DIR}/job_out"
+JOB_NAME="${PBS_JOBNAME:-prepare_adipose_rescue}"
+JOB_ID="${PBS_JOBID:-local}"
+LIVE_LOG="${LOG_DIR}/${JOB_NAME}.${JOB_ID}.live.log"
+
+#######################################
+# Print and run one workflow stage.
+# Arguments:
+#   $1: Human-readable stage name.
+#   Remaining arguments: Command and arguments to execute.
+# Outputs:
+#   Writes the stage name and shell-escaped command to stdout.
+# Returns:
+#   The executed command's exit status.
+#######################################
+run_stage() {
+  local stage_name="$1"
+  shift
+
+  printf 'Stage: %s\n' "${stage_name}"
+  printf 'Command:'
+  printf ' %q' "$@"
+  printf '\n'
+  "$@"
+}
+
+#######################################
+# Validate inputs, activate the environment, and prepare rescue vectors.
+# Outputs:
+#   Writes job context and workflow output to stdout and stderr.
+# Returns:
+#   0 on success; 2 for invalid job settings; otherwise the failing command's
+#   exit status.
+#######################################
+main() {
+  local job_tmp="${TMPDIR:-/tmp}/${USER}/add_${JOB_ID}"
+  local pseudobulk_path="${OUTPUT_DIR}/pseudobulk/adipose_pseudobulk.h5ad"
+  local pseudobulk_command=(
+    add --config "${CONFIG_PATH}" pseudobulk
+    --input "${ADIPOSE_PATH}"
+    --output-dir "${OUTPUT_DIR}/pseudobulk"
+  )
+  local rescue_command=(
+    add --config "${CONFIG_PATH}" rescue
+    --pseudobulk "${pseudobulk_path}"
+    --output-dir "${OUTPUT_DIR}/rescue"
+  )
+
+  if [[ ! -d "${REPO_DIR}" ]]; then
+    printf 'ERROR: repository directory does not exist: %s\n' \
+      "${REPO_DIR}" >&2
+    return 2
+  fi
+  if [[ ! -f "${CONFIG_PATH}" ]]; then
+    printf 'ERROR: baseline config does not exist: %s\n' \
+      "${CONFIG_PATH}" >&2
+    return 2
+  fi
+  if [[ ! -f "${ADIPOSE_PATH}" ]]; then
+    printf 'ERROR: adipose H5AD does not exist: %s\n' \
+      "${ADIPOSE_PATH}" >&2
+    return 2
+  fi
+  if [[ ! -f "${PBS_COMMON}" ]]; then
+    printf 'ERROR: PBS helper does not exist: %s\n' "${PBS_COMMON}" >&2
+    return 2
+  fi
+
+  mkdir -p "${LOG_DIR}" "${OUTPUT_DIR}" "${job_tmp}/matplotlib"
+  source "${PBS_COMMON}"
+  pbs::setup_logging "${LIVE_LOG}"
+  pbs::activate_conda_environment "${CONDA_BASE}" "${CONDA_ENV}"
+  pbs::log_job_context "${JOB_ID}" "${PROJECT_DIR}" "${LIVE_LOG}"
+
+  if ! command -v add >/dev/null; then
+    printf 'ERROR: add CLI is not installed in %s\n' "${CONDA_ENV}" >&2
+    return 2
+  fi
+
+  cd "${REPO_DIR}"
+  export MPLCONFIGDIR="${job_tmp}/matplotlib"
+  export PYTHONUNBUFFERED=1
+
+  printf 'Config: %s\n' "${CONFIG_PATH}"
+  printf 'Adipose input: %s\n' "${ADIPOSE_PATH}"
+  printf 'Output root: %s\n' "${OUTPUT_DIR}"
+  run_stage "build donor-level pseudobulk" "${pseudobulk_command[@]}"
+  run_stage "estimate paired rescue vectors" "${rescue_command[@]}"
+  printf 'Job finished: %s\n' "$(date -Is)"
+}
+
+main "$@"

@@ -1,0 +1,164 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adipose-drug-discovery"
+version = "0.1.0"
+description = "Donor-aware adipose rescue signatures and drug-response baselines."
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Intended Audience :: Science/Research",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+dependencies = [
+  "anndata==0.12.7",
+  "h5py==3.16.0",
+  "matplotlib==3.10.9",
+  "numpy==2.4.6",
+  "pandas==2.3.3",
+  "patsy==1.0.2",
+  "pylimma==0.1.0",
+  "pyarrow==24.0.0",
+  "psutil==7.2.2",
+  "PyYAML==6.0.3",
+  "scikit-learn==1.8.0",
+  "scipy==1.17.1",
+  "statsmodels==0.14.6",
+]
+
+[project.optional-dependencies]
+dev = [
+  "ipykernel==7.3.0",
+  "ipython==8.12.3",
+  "pre-commit",
+  "pyright[nodejs]==1.1.410",
+  "pytest==9.1.0",
+  "pytest-cov",
+  "ruff==0.15.17",
+]
+
+[project.scripts]
+add = "add.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["add*"]
+namespaces = false
+
+[tool.setuptools.data-files]
+"share/adipose_drug_discovery/config" = ["config/baselines.yaml"]
+
+[tool.coverage.run]
+source = ["add"]
+omit = ["tests/**", "**/*_test.py", "**/test_*.py"]
+
+[tool.ruff]
+src = ["add", "tests", "run_scripts/perturbgen"]
+target-version = "py311"
+line-length = 80
+indent-width = 4
+exclude = [
+  ".git",
+  ".ruff_cache",
+  ".venv",
+  "build",
+  "dist",
+  "__pycache__",
+  "*.egg-info",
+  "run_scripts/perturbgen/adipocytes_HVG",
+  "run_scripts/perturbgen/notebooks",
+  "run_scripts/perturbgen/started_only",
+  "run_scripts/perturbgen/subset_2k_adipocytes",
+]
+
+[tool.ruff.lint]
+select = [
+  "ANN001",
+  "ANN002",
+  "ANN003",
+  "ANN201",
+  "ANN202",
+  "ANN204",
+  "ANN205",
+  "ANN206",
+  "B",
+  "BLE",
+  "C4",
+  "D",
+  "E",
+  "F",
+  "G",
+  "I",
+  "PGH003",
+  "PLC0415",
+  "RUF",
+  "UP",
+  "W",
+]
+ignore = [
+  "D205",
+  "D413",
+]
+unfixable = ["F401"]
+fixable = ["ALL"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+known-first-party = ["add", "run_scripts"]
+force-single-line = true
+single-line-exclusions = ["typing", "collections.abc"]
+combine-as-imports = true
+split-on-trailing-comma = true
+lines-after-imports = 2
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+"tests/**/*.py" = [
+  "ANN001",
+  "ANN002",
+  "ANN003",
+  "ANN202",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+docstring-code-format = false
+
+[tool.pyright]
+pythonVersion = "3.11"
+typeCheckingMode = "standard"
+include = ["add", "run_scripts/perturbgen/*.py"]
+exclude = [
+  "**/node_modules",
+  "**/.*",
+  "build",
+  "dist",
+  "**/*.egg-info",
+  "**/__pycache__",
+  "**/*.pyc",
+  "run_scripts/perturbgen/adipocytes_HVG",
+  "run_scripts/perturbgen/notebooks",
+  "run_scripts/perturbgen/started_only",
+  "run_scripts/perturbgen/subset_2k_adipocytes",
+]
+reportMissingImports = true
+reportMissingTypeStubs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["*_test.py", "test_*.py"]
+addopts = [
+  "-ra",
+  "--strict-markers",
+  "--strict-config",
+  "--import-mode=importlib",
+]

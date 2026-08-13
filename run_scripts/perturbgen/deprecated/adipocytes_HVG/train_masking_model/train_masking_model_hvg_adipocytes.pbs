@@ -1,0 +1,19 @@
+#!/bin/bash
+#PBS -l walltime=72:00:00
+#PBS -l select=1:ncpus=8:mem=64gb:ngpus=1
+#PBS -q v1_gpu72
+#PBS -N train_masking_model_hvg_adipocytes
+eval "$(~/miniforge3/bin/conda shell.bash hook)"
+conda activate perturbgen
+module load OpenMPI/4.1.6-GCC-13.2.0
+
+# added this - update if i use a new API key 
+# Supply WANDB_API_KEY through the job environment when logging online.
+export WANDB_PROJECT="perturbgen_hvg_adipocytes"
+
+# Remove DS_Store files before training
+find /rds/general/project/lms-scott-raw/live/Ada/perturbation_modeling/ -name ".DS_Store" -delete
+
+
+cd /rds/general/user/ap5625/home/perturbation_modeling/perturbGEN/adipocytes_HVG/train_masking_model
+python train_masking_model_hvg_adipocytes.py

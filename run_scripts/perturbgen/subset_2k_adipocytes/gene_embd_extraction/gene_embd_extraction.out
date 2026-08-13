@@ -1,29 +1,0 @@
-loading, please wait...
-Current working directory: /rds/general/project/lms-scott-raw/live/Ada/perturbation_modeling
-positional encoding: time_pos_sin
-Loading and preprocessing data...
-Loading 1_weightloss.dataset...
-Loading 1_weightloss.h5ad...
----PerturbGen training --- 
-Target vocab size: 1464, max sequence length: 381
-Return gene embs for ['weightloss'] in condition.
-Data loaded and preprocessed.
--- Initializing scmaskgit model
-Start datamodule
-Using device gpu.
-Define context_tps for testing
-Testing: |          | 0/? [00:00<?, ?it/s]Testing:   0%|          | 0/16 [00:00<?, ?it/s]Testing DataLoader 0:   0%|          | 0/16 [00:00<?, ?it/s]Testing DataLoader 0:  62%|██████▎   | 10/16 [00:06<00:03,  1.60it/s]Testing DataLoader 0: 100%|██████████| 16/16 [00:09<00:00,  1.72it/s]---Start saving embeddings
-End saving embeddings---
-Testing DataLoader 0: 100%|██████████| 16/16 [00:09<00:00,  1.69it/s][1;34mwandb[0m: 
-[1;34mwandb[0m: 🚀 View run [33m20260612_2202_PerturbGen[0m at: [34mhttps://wandb.ai/ap5625-imperial-college-london/ttransformer/runs/4ueea36r[0m
-
-/rds/general/user/ap5625/home/miniforge3/envs/perturbgen/bin/python -m perturbgen extract-embedding --test_mode masking --split False --splitting_mode stratified --cond_list cell_states_adipocytes --return_embed True --return_attn False --generate False --ckpt_masking_path /rds/general/project/lms-scott-raw/live/Ada/perturbation_modeling/T_perturb/res/checkpoints/20260609_0537_cellgen_train_masking_lr_0.0001_wd_0.0001_batch_64_ptime_pos_sin_m_pow_tp_1_s_0-epoch=19.ckpt --output_dir /rds/general/project/lms-scott-raw/live/Ada/perturbation_modeling/T_perturb/res/masking --src_dataset /rds/general/project/lms-scott-raw/live/Ada/perturbation_modeling/T_perturb/tokenized_data/adipocytes_subset_obese_WL/dataset_all_src/obese.dataset --tgt_dataset_folder /rds/general/project/lms-scott-raw/live/Ada/perturbation_modeling/T_perturb/tokenized_data/adipocytes_subset_obese_WL/dataset_all_tgt --src_adata /rds/general/project/lms-scott-raw/live/Ada/perturbation_modeling/T_perturb/tokenized_data/adipocytes_subset_obese_WL/h5ad_pairing_all_src/obese.h5ad --tgt_adata_folder /rds/general/project/lms-scott-raw/live/Ada/perturbation_modeling/T_perturb/tokenized_data/adipocytes_subset_obese_WL/h5ad_pairing_all_tgt --mapping_dict_path /rds/general/project/lms-scott-raw/live/Ada/perturbation_modeling/T_perturb/tokenized_data/adipocytes_subset_obese_WL/token_id_to_genename_all.pkl --batch_size 64 --cellgen_lr 0.0001 --cellgen_wd 0.0001 --count_lr 0.001 --count_wd 0.001 --d_ff 32 --num_layers 6 --n_workers 16 --pred_tps 1 --var_list cell_pairing_index cell_states_adipocytes condition --tokenid_to_rowid /rds/general/project/lms-scott-raw/live/Ada/perturbation_modeling/T_perturb/tokenized_data/adipocytes_subset_obese_WL/tokenid_to_rowid_all.pkl --encoder scmaskgit --encoder_path /rds/general/project/lms-scott-raw/live/Ada/perturbation_modeling/Perturbgen/pretraining_cohort/20250709_1223_cellgen_train_masking_lr_5e-05_wd_1e-06_batch_64_ptime_pos_sin_m_pow_tp_1-2-3_s_42-epoch=00.ckpt --context_mode True --mask_scheduler pow --return_gene_embs True --gene_embs_condition condition --pos_encoding_mode time_pos_sin --d_model 768
-
-====================================
-CPU Time used: 00:00:18
-CPU Percent: 11%
-Memory usage: 1815360kb
-Approx Power usage: 0.0
-Walltime usage: 00:03:20
-
-====================================
