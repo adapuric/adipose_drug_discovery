@@ -71,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     baseline_parser.add_argument(
         "--model",
-        choices=("perturbed-mean", "pca-ridge", "mean-drug", "cmap"),
+        choices=("train-mean", "pca-ridge", "mean-drug", "cmap"),
         required=True,
     )
     baseline_parser.add_argument("--signatures", type=Path)

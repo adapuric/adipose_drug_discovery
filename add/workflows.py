@@ -16,14 +16,14 @@ import pandas as pd
 
 from add.baselines import build_adipose_starting_expression
 from add.baselines import evaluate_pca_ridge
-from add.baselines import evaluate_perturbed_mean
+from add.baselines import evaluate_train_mean
 from add.baselines import fit_pca_ridge
 from add.baselines import mean_drug_signatures
 from add.baselines import predict_pca_ridge
 from add.baselines import score_cmap
 from add.baselines import score_mean_drug
 from add.baselines import score_pca_ridge
-from add.baselines import score_perturbed_mean
+from add.baselines import score_train_mean
 from add.data import AnalysisConfig
 from add.data import file_identity
 from add.data import load_adipose
@@ -375,7 +375,7 @@ def rank_drug_candidates(
     workers: int | None = None,
 ) -> Path:
     """Run the selected baseline using shared scoring infrastructure."""
-    supported_models = {"perturbed-mean", "pca-ridge", "mean-drug", "cmap"}
+    supported_models = {"train-mean", "pca-ridge", "mean-drug", "cmap"}
     if model not in supported_models:
         raise ValueError(f"Unsupported baseline model: {model!r}.")
     resolved_workers = get_physical_cores() if workers is None else workers
@@ -424,8 +424,8 @@ def rank_drug_candidates(
         PerturbSignatures,
         Path | None,
     ]
-    if model == "perturbed-mean":
-        outputs = _perturbed_mean_outputs(
+    if model == "train-mean":
+        outputs = _train_mean_outputs(
             signatures,
             rescue_vectors=rescue_vectors,
             minimum_shared_genes=minimum_shared_genes,
@@ -511,7 +511,7 @@ def rank_drug_candidates(
     return ranked_path
 
 
-def _perturbed_mean_outputs(
+def _train_mean_outputs(
     signatures: PerturbSignatures,
     *,
     rescue_vectors: Mapping[str, pd.Series],
@@ -531,7 +531,7 @@ def _perturbed_mean_outputs(
         "tahoe",
     )
     drug_col = _string_value(config.tahoe, "drug_col", "tahoe")
-    evaluation = evaluate_perturbed_mean(
+    evaluation = evaluate_train_mean(
         signatures,
         context_col=context_cols,
         drug_col=drug_col,
@@ -543,7 +543,7 @@ def _perturbed_mean_outputs(
         random_seed=config.random_seed,
         minimum_shared_genes=minimum_shared_genes,
     )
-    ranked = score_perturbed_mean(
+    ranked = score_train_mean(
         signatures,
         rescue_vectors,
         context_col=context_cols,

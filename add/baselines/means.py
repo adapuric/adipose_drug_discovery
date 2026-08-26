@@ -1,4 +1,4 @@
-"""Perturbed-mean and per-drug mean baseline methods."""
+"""Train-mean and per-drug mean baseline methods."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from add.baselines.signatures import _signature_positions
 from add.perturb import PerturbSignatures
 
 
-def perturbed_mean_signature(
+def train_mean_signature(
     signatures: PerturbSignatures,
     *,
     training_signature_ids: Sequence[str] | None = None,
@@ -44,7 +44,7 @@ def perturbed_mean_signature(
     return np.mean(training_delta, axis=0)
 
 
-def evaluate_perturbed_mean(
+def evaluate_train_mean(
     signatures: PerturbSignatures,
     *,
     context_col: str | Sequence[str],
@@ -61,7 +61,7 @@ def evaluate_perturbed_mean(
         random_seed=random_seed,
     )
 
-    prediction = perturbed_mean_signature(
+    prediction = train_mean_signature(
         signatures,
         training_signature_ids=train_ids,
     )
@@ -97,7 +97,7 @@ def evaluate_perturbed_mean(
                 "score_status": score["score_status"],
                 "n_training_signatures": len(train_ids),
                 "random_seed": random_seed,
-                "baseline": "perturbed-mean",
+                "baseline": "train-mean",
             }
         )
 
@@ -108,7 +108,7 @@ def evaluate_perturbed_mean(
     )
 
 
-def score_perturbed_mean(
+def score_train_mean(
     signatures: PerturbSignatures,
     rescue_vectors: Mapping[str, pd.Series],
     *,
@@ -122,7 +122,7 @@ def score_perturbed_mean(
     The output deliberately contains no drug rows or drug ordering because the
     prediction is identical for every perturbation identity.
     """
-    mean_delta = perturbed_mean_signature(
+    mean_delta = train_mean_signature(
         signatures,
         training_signature_ids=training_signature_ids,
     )
@@ -154,10 +154,10 @@ def score_perturbed_mean(
                 state=state,
                 score=score,
                 source=source,
-                baseline="perturbed-mean",
+                baseline="train-mean",
                 score_name="pearson_mimic",
                 drug=pd.NA,
-                signature_id="PERTURBED_MEAN",
+                signature_id="TRAIN_MEAN",
                 context=pd.NA,
                 n_external_contexts=n_contexts,
                 n_training_signatures=n_training,

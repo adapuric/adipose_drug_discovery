@@ -9,7 +9,7 @@
 # Download all Tahoe-100M plates and the LINCS files used by the baselines.
 #
 # Submit from the repository root:
-#   qsub run_scripts/baselines/pbs/download_data.pbs
+#   qsub run_scripts/baselines/download_data.pbs
 
 set -o errexit
 set -o nounset
@@ -42,10 +42,10 @@ run_stage() {
   local stage_name="$1"
   shift
 
-  printf 'Stage: %s\n' "${stage_name}"
+  printf '\nStage: %s\n' "${stage_name}"
   printf 'Command:'
   printf ' %q' "$@"
-  printf '\n'
+  printf '\n\n'
   "$@"
 }
 
@@ -126,7 +126,7 @@ main() {
     decompress_archive "${archive}"
   done
 
-  printf 'Job finished: %s\n' "$(date -Is)"
+  printf '\nJob finished: %s\n' "$(date -Is)"
 }
 
 main "$@"

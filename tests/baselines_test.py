@@ -9,15 +9,15 @@ import pytest
 
 from add.baselines import build_adipose_starting_expression
 from add.baselines import evaluate_pca_ridge
-from add.baselines import evaluate_perturbed_mean
+from add.baselines import evaluate_train_mean
 from add.baselines import fit_pca_ridge
 from add.baselines import mean_drug_signatures
-from add.baselines import perturbed_mean_signature
 from add.baselines import predict_pca_ridge
 from add.baselines import score_cmap
 from add.baselines import score_mean_drug
-from add.baselines import score_perturbed_mean
+from add.baselines import score_train_mean
 from add.baselines import split_signature_contexts
+from add.baselines import train_mean_signature
 from add.perturb import PerturbSignatures
 
 
@@ -49,7 +49,7 @@ def test_context_split_is_deterministic_and_keeps_contexts_disjoint() -> None:
     assert train_contexts.isdisjoint(test_contexts)
 
 
-def test_perturbed_mean_uses_only_training_signatures() -> None:
+def test_train_mean_uses_only_training_signatures() -> None:
     """A held-out outlier cannot leak into the generic training mean."""
     signatures = _make_signatures(
         delta=np.array(
@@ -63,11 +63,11 @@ def test_perturbed_mean_uses_only_training_signatures() -> None:
         drugs=["a", "b", "outlier"],
     )
 
-    mean_delta = perturbed_mean_signature(
+    mean_delta = train_mean_signature(
         signatures,
         training_signature_ids=["s0", "s1"],
     )
-    generic_scores = score_perturbed_mean(
+    generic_scores = score_train_mean(
         signatures,
         {"AD_ALL": pd.Series([2.0, 3.0, 4.0], index=signatures.genes)},
         training_signature_ids=["s0", "s1"],
@@ -77,10 +77,11 @@ def test_perturbed_mean_uses_only_training_signatures() -> None:
     np.testing.assert_allclose(mean_delta, [2.0, 3.0, 4.0])
     assert len(generic_scores) == 1
     assert pd.isna(generic_scores.loc[0, "drug"])
-    assert generic_scores.loc[0, "signature_id"] == "PERTURBED_MEAN"
+    assert generic_scores.loc[0, "signature_id"] == "TRAIN_MEAN"
+    assert generic_scores.loc[0, "baseline"] == "train-mean"
 
 
-def test_perturbed_mean_evaluation_is_deterministic() -> None:
+def test_train_mean_evaluation_is_deterministic() -> None:
     """Held-out mean-prediction metrics repeat exactly for a fixed seed."""
     signatures = _make_signatures(
         delta=np.array(
@@ -97,14 +98,14 @@ def test_perturbed_mean_evaluation_is_deterministic() -> None:
         drugs=["a", "b", "a", "b", "a", "b"],
     )
 
-    first = evaluate_perturbed_mean(
+    first = evaluate_train_mean(
         signatures,
         context_col="context_id",
         drug_col="drug",
         test_fraction=0.34,
         random_seed=23,
     )
-    second = evaluate_perturbed_mean(
+    second = evaluate_train_mean(
         signatures,
         context_col="context_id",
         drug_col="drug",
@@ -113,6 +114,7 @@ def test_perturbed_mean_evaluation_is_deterministic() -> None:
     )
 
     pd.testing.assert_frame_equal(first, second)
+    assert first["baseline"].eq("train-mean").all()
 
 
 def test_pca_ridge_predictions_use_adipose_starting_expression() -> None:

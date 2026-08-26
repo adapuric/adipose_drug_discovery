@@ -23,10 +23,10 @@ adipose H5AD as a Tahoe shard.
 To download the required drug-database files, run:
 
 ```bash
-qsub adipose_drug_discovery/run_scripts/baselines/pbs/download_data.pbs
+qsub adipose_drug_discovery/run_scripts/baselines/download_data.pbs
 ```
 
-See [`download_data.pbs`](run_scripts/baselines/pbs/download_data.pbs) for the
+See [`download_data.pbs`](run_scripts/baselines/download_data.pbs) for the
 download job. All 14 Tahoe plates require approximately 328 GB.
 
 <br>
@@ -38,7 +38,7 @@ add pseudobulk
 add rescue
 
 add perturb --source tahoe
-add baseline --model perturbed-mean
+add baseline --model train-mean
 add baseline --model pca-ridge
 add baseline --model mean-drug
 

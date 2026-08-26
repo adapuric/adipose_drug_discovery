@@ -1,15 +1,16 @@
 #!/bin/bash
-#PBS -N run_tahoe_baselines
-#PBS -l select=1:ncpus=32:mem=128gb
-#PBS -l walltime=72:00:00
+#PBS -N run_lincs_baseline
+#PBS -l select=1:ncpus=32:mem=64gb
+#PBS -l walltime=24:00:00
 #PBS -m a
 #PBS -j oe
 #PBS -o /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/job_out
 
-# Cache all Tahoe plates and run the three Tahoe-based baseline models.
+# Cache the measured LINCS signatures and run the CMap baseline.
 #
 # Submit after prepare_rescue.pbs succeeds:
-#   qsub run_scripts/baselines/pbs/run_tahoe.pbs
+#   qsub -v CONFIG_PATH=/path/to/baselines.yaml \
+#     run_scripts/baselines/run_lincs.pbs
 
 set -o errexit
 set -o nounset
@@ -20,12 +21,13 @@ ROOT="/rds/general/user/sho3/projects/lms-scott-raw/live/steve"
 PROJECT_DIR="${ROOT}/add"
 REPO_DIR="${PROJECT_DIR}/adipose_drug_discovery"
 DATA_DIR="${PROJECT_DIR}/data"
-TAHOE_DIR="${TAHOE_DIR:-${DATA_DIR}/tahoe}"
 OUTPUT_DIR="${PROJECT_DIR}/baselines"
 CONFIG_PATH="${CONFIG_PATH:-${REPO_DIR}/config/baselines.yaml}"
-PSEUDOBULK_PATH="${OUTPUT_DIR}/pseudobulk/adipose_pseudobulk.h5ad"
+LINCS_MATRIX="${DATA_DIR}/GSE70138_Broad_LINCS_Level5_COMPZ_n118050x12328_2017-03-06.gctx"
+LINCS_METADATA="${DATA_DIR}/GSE70138_Broad_LINCS_sig_info_2017-03-06.txt"
+LINCS_GENE_METADATA="${DATA_DIR}/GSE70138_Broad_LINCS_gene_info_2017-03-06.txt"
 RESCUE_PATH="${OUTPUT_DIR}/rescue/rescue_vectors.csv.gz"
-SIGNATURE_PREFIX="${OUTPUT_DIR}/perturb/tahoe_signatures"
+SIGNATURE_PREFIX="${OUTPUT_DIR}/perturb/lincs_signatures"
 
 # Conda and workers
 CONDA_BASE="${ROOT}/software/conda/base"
@@ -36,7 +38,7 @@ WORKERS="${WORKERS:-$((ALLOCATED_CPUS > 1 ? ALLOCATED_CPUS - 1 : 1))}"
 # PBS logging
 PBS_COMMON="/rds/general/user/sho3/home/pbs_common.sh"
 LOG_DIR="${PROJECT_DIR}/job_out"
-JOB_NAME="${PBS_JOBNAME:-run_tahoe_baselines}"
+JOB_NAME="${PBS_JOBNAME:-run_lincs_baseline}"
 JOB_ID="${PBS_JOBID:-local}"
 LIVE_LOG="${LOG_DIR}/${JOB_NAME}.${JOB_ID}.live.log"
 
@@ -54,15 +56,15 @@ run_stage() {
   local stage_name="$1"
   shift
 
-  printf 'Stage: %s\n' "${stage_name}"
+  printf '\nStage: %s\n' "${stage_name}"
   printf 'Command:'
   printf ' %q' "$@"
-  printf '\n'
+  printf '\n\n'
   "$@"
 }
 
 #######################################
-# Validate inputs, activate the environment, and run Tahoe baselines.
+# Validate inputs, activate the environment, and run the LINCS baseline.
 # Outputs:
 #   Writes job context and workflow output to stdout and stderr.
 # Returns:
@@ -70,17 +72,22 @@ run_stage() {
 #   exit status.
 #######################################
 main() {
-  local baseline_command=()
+  local baseline_command=(
+    add --config "${CONFIG_PATH}" baseline
+    --model cmap
+    --signatures "${SIGNATURE_PREFIX}"
+    --rescue "${RESCUE_PATH}"
+    --output-dir "${OUTPUT_DIR}/cmap"
+    --workers "${WORKERS}"
+  )
   local job_tmp="${TMPDIR:-/tmp}/${USER}/add_${JOB_ID}"
-  local model=""
   local perturb_command=(
     add --config "${CONFIG_PATH}" perturb
-    --source tahoe
-    --input "${TAHOE_DIR}"
+    --source lincs
+    --matrix "${LINCS_MATRIX}"
+    --metadata "${LINCS_METADATA}"
+    --gene-metadata "${LINCS_GENE_METADATA}"
     --output-prefix "${SIGNATURE_PREFIX}"
-  )
-  local tahoe_files=(
-    "${TAHOE_DIR}"/plate*_filt_Vevo_Tahoe100M_WServicesFrom_ParseGigalab.h5ad
   )
 
   if [[ ! -d "${REPO_DIR}" ]]; then
@@ -93,14 +100,18 @@ main() {
       "${CONFIG_PATH}" >&2
     return 2
   fi
-  if [[ ! -f "${tahoe_files[0]}" ]]; then
-    printf 'ERROR: Tahoe directory contains no downloaded plates: %s\n' \
-      "${TAHOE_DIR}" >&2
+  if [[ ! -f "${LINCS_MATRIX}" ]]; then
+    printf 'ERROR: LINCS matrix does not exist: %s\n' "${LINCS_MATRIX}" >&2
     return 2
   fi
-  if [[ ! -f "${PSEUDOBULK_PATH}" ]]; then
-    printf 'ERROR: pseudobulk input does not exist: %s\n' \
-      "${PSEUDOBULK_PATH}" >&2
+  if [[ ! -f "${LINCS_METADATA}" ]]; then
+    printf 'ERROR: LINCS metadata does not exist: %s\n' \
+      "${LINCS_METADATA}" >&2
+    return 2
+  fi
+  if [[ ! -f "${LINCS_GENE_METADATA}" ]]; then
+    printf 'ERROR: LINCS gene metadata does not exist: %s\n' \
+      "${LINCS_GENE_METADATA}" >&2
     return 2
   fi
   if [[ ! -f "${RESCUE_PATH}" ]]; then
@@ -134,27 +145,13 @@ main() {
   export PYTHONUNBUFFERED=1
 
   printf 'Config: %s\n' "${CONFIG_PATH}"
-  printf 'Tahoe input: %s (%d plates)\n' \
-    "${TAHOE_DIR}" "${#tahoe_files[@]}"
+  printf 'LINCS matrix: %s\n' "${LINCS_MATRIX}"
   printf 'Output root: %s\n' "${OUTPUT_DIR}"
   printf 'Worker processes: %s\n' "${WORKERS}"
-  run_stage "cache Tahoe perturbation signatures" \
+  run_stage "cache LINCS perturbation signatures" \
     "${perturb_command[@]}"
-
-  for model in perturbed-mean pca-ridge mean-drug; do
-    baseline_command=(
-      add --config "${CONFIG_PATH}" baseline
-      --model "${model}"
-      --signatures "${SIGNATURE_PREFIX}"
-      --rescue "${RESCUE_PATH}"
-      --pseudobulk "${PSEUDOBULK_PATH}"
-      --output-dir "${OUTPUT_DIR}/${model}"
-      --workers "${WORKERS}"
-    )
-    run_stage "run ${model} baseline" "${baseline_command[@]}"
-  done
-
-  printf 'Job finished: %s\n' "$(date -Is)"
+  run_stage "run CMap baseline" "${baseline_command[@]}"
+  printf '\nJob finished: %s\n' "$(date -Is)"
 }
 
 main "$@"

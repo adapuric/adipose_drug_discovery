@@ -1,5 +1,5 @@
 #!/bin/bash
-#PBS -N train_count_decoder
+#PBS -N train_decoder
 #PBS -l select=1:ncpus=16:mem=64gb:ngpus=1
 #PBS -l walltime=72:00:00
 #PBS -q v1_gpu72
@@ -12,7 +12,7 @@
 # Submit with a workflow config and existing masking checkpoint:
 #   qsub \
 #     -v CONFIG_PATH=/path/to/config.yaml,MASKING_CHECKPOINT=/path/to/masking.ckpt \
-#     run_scripts/perturbgen/pbs/train_count_decoder.pbs
+#     run_scripts/perturbgen/train_decoder.pbs
 
 set -o errexit
 set -o nounset
@@ -35,7 +35,7 @@ MASKING_CHECKPOINT="${MASKING_CHECKPOINT:-}"
 # PBS logging
 PBS_COMMON="/rds/general/user/sho3/home/pbs_common.sh"
 LOG_DIR="${PROJECT_DIR}/job_out"
-JOB_NAME="${PBS_JOBNAME:-train_count_decoder}"
+JOB_NAME="${PBS_JOBNAME:-train_decoder}"
 JOB_ID="${PBS_JOBID:-local}"
 LIVE_LOG="${LOG_DIR}/${JOB_NAME}.${JOB_ID}.live.log"
 

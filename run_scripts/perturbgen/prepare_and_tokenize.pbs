@@ -1,18 +1,16 @@
 #!/bin/bash
-#PBS -N gene_embd_extraction_subset
-#PBS -l select=1:ncpus=16:mem=32gb:ngpus=1
+#PBS -N prepare_tokenize_adipose
+#PBS -l select=1:ncpus=18:mem=128gb
 #PBS -l walltime=24:00:00
-#PBS -q v1_gpu72
 #PBS -m a
 #PBS -j oe
 #PBS -o /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/job_out
 
-# Extract PerturbGen gene/cell embeddings from a selected masking checkpoint.
+# Prepare the paired adipocyte H5AD and tokenize it for PerturbGen.
 #
-# Submit with a workflow config and existing masking checkpoint:
-#   qsub \
-#     -v CONFIG_PATH=/path/to/config.yaml,MASKING_CHECKPOINT=/path/to/masking.ckpt \
-#     run_scripts/perturbgen/pbs/gene_embd_extraction_subset.pbs
+# Submit from the repository root with a workflow config:
+#   qsub -v CONFIG_PATH=/path/to/config.yaml \
+#     run_scripts/perturbgen/prepare_and_tokenize.pbs
 
 set -o errexit
 set -o nounset
@@ -23,19 +21,17 @@ ROOT="/rds/general/user/sho3/projects/lms-scott-raw/live/steve"
 PROJECT_DIR="${ROOT}/add"
 REPO_DIR="${PROJECT_DIR}/adipose_drug_discovery"
 CONFIG_PATH="${CONFIG_PATH:-${REPO_DIR}/run_scripts/perturbgen/config.yaml}"
+RESULTS_DIR="${PROJECT_DIR}/pg_results"
+NATIVE_OUTPUT_DIR="${PROJECT_DIR}/T_perturb"
 
-# Conda and modules
+# Conda
 CONDA_BASE="${ROOT}/software/conda/base"
 CONDA_ENV="${ROOT}/software/envs/perturbgen"
-OPENMPI_MODULE="${OPENMPI_MODULE:-OpenMPI/4.1.6-GCC-13.2.0}"
-
-# qsub -v parameters
-MASKING_CHECKPOINT="${MASKING_CHECKPOINT:-}"
 
 # PBS logging
 PBS_COMMON="/rds/general/user/sho3/home/pbs_common.sh"
 LOG_DIR="${PROJECT_DIR}/job_out"
-JOB_NAME="${PBS_JOBNAME:-gene_embd_extraction_subset}"
+JOB_NAME="${PBS_JOBNAME:-prepare_tokenize_adipose}"
 JOB_ID="${PBS_JOBID:-local}"
 LIVE_LOG="${LOG_DIR}/${JOB_NAME}.${JOB_ID}.live.log"
 
@@ -61,15 +57,24 @@ run_stage() {
 }
 
 #######################################
-# Validate settings, activate PerturbGen, and extract embeddings.
+# Validate settings, activate PerturbGen, and run preparation and tokenization.
 # Outputs:
-#   Writes job context and extraction output to stdout and stderr.
+#   Writes job context and workflow output to stdout and stderr.
 # Returns:
 #   0 on success; 2 for invalid job settings; otherwise the failing command's
 #   exit status.
 #######################################
 main() {
-  local command=()
+  local prepare_command=(
+    python -u -m run_scripts.perturbgen.prepare_adipose
+    --config "${CONFIG_PATH}"
+  )
+  local tokenize_command=(
+    python -u -m run_scripts.perturbgen.tokenize
+    --config "${CONFIG_PATH}"
+  )
+
+  mkdir -p "${RESULTS_DIR}" "${NATIVE_OUTPUT_DIR}" "${LOG_DIR}"
 
   if [[ ! -d "${REPO_DIR}" ]]; then
     printf 'ERROR: repository directory does not exist: %s\n' \
@@ -81,38 +86,25 @@ main() {
       "${CONFIG_PATH}" >&2
     return 2
   fi
-  if [[ -z "${MASKING_CHECKPOINT}" ]]; then
-    printf 'ERROR: submit with MASKING_CHECKPOINT=/path/to/masking.ckpt\n' >&2
-    return 2
-  fi
-  if [[ ! -f "${MASKING_CHECKPOINT}" ]]; then
-    printf 'ERROR: masking checkpoint does not exist: %s\n' \
-      "${MASKING_CHECKPOINT}" >&2
-    return 2
-  fi
   if [[ ! -f "${PBS_COMMON}" ]]; then
     printf 'ERROR: PBS helper does not exist: %s\n' "${PBS_COMMON}" >&2
     return 2
   fi
 
-  command=(
-    python -u -m run_scripts.perturbgen.extract_embeddings
-    --config "${CONFIG_PATH}"
-    --checkpoint "${MASKING_CHECKPOINT}"
-  )
-  mkdir -p "${LOG_DIR}"
   source "${PBS_COMMON}"
   pbs::setup_logging "${LIVE_LOG}"
   pbs::activate_conda_environment "${CONDA_BASE}" "${CONDA_ENV}"
   pbs::log_job_context "${JOB_ID}" "${PROJECT_DIR}" "${LIVE_LOG}"
 
-  module load "${OPENMPI_MODULE}"
   cd "${REPO_DIR}"
   export PYTHONUNBUFFERED=1
 
   printf 'Config: %s\n' "${CONFIG_PATH}"
-  printf 'Masking checkpoint: %s\n' "${MASKING_CHECKPOINT}"
-  run_stage "extract PerturbGen embeddings" "${command[@]}"
+  printf 'Results root: %s\n' "${RESULTS_DIR}"
+  printf 'Native PerturbGen output: %s\n' "${NATIVE_OUTPUT_DIR}"
+  run_stage "prepare paired adipocytes" "${prepare_command[@]}"
+  run_stage "tokenize paired adipocytes" "${tokenize_command[@]}"
+
   printf '\nJob finished: %s\n' "$(date -Is)"
 }
 

@@ -63,19 +63,19 @@ Submit each job with the same workflow config:
 CONFIG_PATH=/path/to/config.yaml
 
 qsub -v CONFIG_PATH="${CONFIG_PATH}" \
-  adipose_drug_discovery/run_scripts/perturbgen/pbs/prepare_and_tokenize.pbs
+  adipose_drug_discovery/run_scripts/perturbgen/prepare_and_tokenize.pbs
 qsub -v CONFIG_PATH="${CONFIG_PATH}" \
-  adipose_drug_discovery/run_scripts/perturbgen/pbs/train_masking_model_subset.pbs
+  adipose_drug_discovery/run_scripts/perturbgen/train_masking_model.pbs
 
 # Replace this with the masking checkpoint selected from the preceding job.
 MASKING_CHECKPOINT=/path/to/masking.ckpt
 
 qsub \
   -v CONFIG_PATH="${CONFIG_PATH}",MASKING_CHECKPOINT="${MASKING_CHECKPOINT}" \
-  adipose_drug_discovery/run_scripts/perturbgen/pbs/train_count_decoder.pbs
+  adipose_drug_discovery/run_scripts/perturbgen/train_decoder.pbs
 qsub \
   -v CONFIG_PATH="${CONFIG_PATH}",MASKING_CHECKPOINT="${MASKING_CHECKPOINT}" \
-  adipose_drug_discovery/run_scripts/perturbgen/pbs/gene_embd_extraction_subset.pbs
+  adipose_drug_discovery/run_scripts/perturbgen/embedding_extraction.pbs
 ```
 
 Decoder training and embedding extraction both use the masking checkpoint, so

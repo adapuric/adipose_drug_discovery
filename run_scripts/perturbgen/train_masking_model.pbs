@@ -1,5 +1,5 @@
 #!/bin/bash
-#PBS -N train_masking_model_subset
+#PBS -N train_masking_model
 #PBS -l select=1:ncpus=8:mem=64gb:ngpus=1:gpu_type=L40S
 #PBS -l walltime=72:00:00
 #PBS -q v1_gpu72
@@ -11,7 +11,7 @@
 #
 # Submit from the repository root with a workflow config:
 #   qsub -v CONFIG_PATH=/path/to/config.yaml \
-#     run_scripts/perturbgen/pbs/train_masking_model_subset.pbs
+#     run_scripts/perturbgen/train_masking_model.pbs
 
 set -o errexit
 set -o nounset
@@ -31,7 +31,7 @@ OPENMPI_MODULE="${OPENMPI_MODULE:-OpenMPI/4.1.6-GCC-13.2.0}"
 # PBS logging
 PBS_COMMON="/rds/general/user/sho3/home/pbs_common.sh"
 LOG_DIR="${PROJECT_DIR}/job_out"
-JOB_NAME="${PBS_JOBNAME:-train_masking_model_subset}"
+JOB_NAME="${PBS_JOBNAME:-train_masking_model}"
 JOB_ID="${PBS_JOBID:-local}"
 LIVE_LOG="${LOG_DIR}/${JOB_NAME}.${JOB_ID}.live.log"
 
