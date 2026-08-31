@@ -95,9 +95,19 @@ main() {
       "${REPO_DIR}" >&2
     return 2
   fi
+  if [[ "${CONFIG_PATH}" != /* ]]; then
+    printf 'ERROR: CONFIG_PATH must be absolute, got: %s\n' \
+      "${CONFIG_PATH}" >&2
+    return 2
+  fi
   if [[ ! -f "${CONFIG_PATH}" ]]; then
     printf 'ERROR: baseline config does not exist: %s\n' \
       "${CONFIG_PATH}" >&2
+    return 2
+  fi
+  if [[ ! -d "${CONDA_ENV}" ]]; then
+    printf 'ERROR: add Conda environment does not exist: %s\n' \
+      "${CONDA_ENV}" >&2
     return 2
   fi
   if [[ ! -f "${LINCS_MATRIX}" ]]; then

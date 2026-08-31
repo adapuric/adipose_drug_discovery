@@ -26,7 +26,7 @@ NATIVE_OUTPUT_DIR="${PROJECT_DIR}/T_perturb"
 
 # Conda
 CONDA_BASE="${ROOT}/software/conda/base"
-CONDA_ENV="${ROOT}/software/envs/perturbgen"
+CONDA_ENV="/rds/general/user/sho3/projects/lms-scott-raw/live/steve/software/envs/perturbgen"
 
 # PBS logging
 PBS_COMMON="/rds/general/user/sho3/home/pbs_common.sh"
@@ -81,9 +81,19 @@ main() {
       "${REPO_DIR}" >&2
     return 2
   fi
+  if [[ "${CONFIG_PATH}" != /* ]]; then
+    printf 'ERROR: CONFIG_PATH must be absolute, got: %s\n' \
+      "${CONFIG_PATH}" >&2
+    return 2
+  fi
   if [[ ! -f "${CONFIG_PATH}" ]]; then
     printf 'ERROR: PerturbGen config does not exist: %s\n' \
       "${CONFIG_PATH}" >&2
+    return 2
+  fi
+  if [[ ! -d "${CONDA_ENV}" ]]; then
+    printf 'ERROR: PerturbGen Conda environment does not exist: %s\n' \
+      "${CONDA_ENV}" >&2
     return 2
   fi
   if [[ ! -f "${PBS_COMMON}" ]]; then

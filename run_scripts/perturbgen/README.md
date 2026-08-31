@@ -60,23 +60,31 @@ Checkpoint paths can be written into `config.yaml` or passed with
 Submit each job with the same workflow config:
 
 ```bash
-CONFIG_PATH=/path/to/config.yaml
+PROJECT_DIR=/rds/general/user/sho3/projects/lms-scott-raw/live/steve/add
+REPO_DIR="${PROJECT_DIR}/adipose_drug_discovery"
+CONFIG_PATH="${REPO_DIR}/run_scripts/perturbgen/config.yaml"
 
 qsub -v CONFIG_PATH="${CONFIG_PATH}" \
-  adipose_drug_discovery/run_scripts/perturbgen/prepare_and_tokenize.pbs
+  "${REPO_DIR}/run_scripts/perturbgen/prepare_and_tokenize.pbs"
 qsub -v CONFIG_PATH="${CONFIG_PATH}" \
-  adipose_drug_discovery/run_scripts/perturbgen/train_masking_model.pbs
+  "${REPO_DIR}/run_scripts/perturbgen/train_masking_model.pbs"
 
 # Replace this with the masking checkpoint selected from the preceding job.
 MASKING_CHECKPOINT=/path/to/masking.ckpt
 
 qsub \
   -v CONFIG_PATH="${CONFIG_PATH}",MASKING_CHECKPOINT="${MASKING_CHECKPOINT}" \
-  adipose_drug_discovery/run_scripts/perturbgen/train_decoder.pbs
+  "${REPO_DIR}/run_scripts/perturbgen/train_decoder.pbs"
 qsub \
   -v CONFIG_PATH="${CONFIG_PATH}",MASKING_CHECKPOINT="${MASKING_CHECKPOINT}" \
-  adipose_drug_discovery/run_scripts/perturbgen/embedding_extraction.pbs
+  "${REPO_DIR}/run_scripts/perturbgen/embedding_extraction.pbs"
 ```
+
+The PBS jobs use
+`/rds/general/user/sho3/projects/lms-scott-raw/live/steve/software/envs/perturbgen`.
+`CONFIG_PATH` must be absolute so its meaning does not depend on the scheduler
+working directory. Omitting it uses the absolute repository default shown
+above.
 
 Decoder training and embedding extraction both use the masking checkpoint, so
 their jobs can run at the same time. After they finish, run the perturbation
