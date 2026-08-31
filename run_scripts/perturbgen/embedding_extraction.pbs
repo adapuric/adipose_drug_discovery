@@ -119,9 +119,11 @@ main() {
   module load "${OPENMPI_MODULE}"
   cd "${REPO_DIR}"
   export PYTHONUNBUFFERED=1
+  export WANDB_MODE="${WANDB_MODE:-offline}"
 
   printf 'Config: %s\n' "${CONFIG_PATH}"
   printf 'Masking checkpoint: %s\n' "${MASKING_CHECKPOINT}"
+  printf 'W&B mode: %s\n' "${WANDB_MODE}"
   run_stage "extract PerturbGen embeddings" "${command[@]}"
   printf '\nJob finished: %s\n' "$(date -Is)"
 }

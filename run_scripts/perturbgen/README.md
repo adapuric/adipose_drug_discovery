@@ -55,6 +55,34 @@ Checkpoint paths can be written into `config.yaml` or passed with
 
 <br>
 
+## One-time environment setup
+
+PerturbGen currently imports Geneformer while loading the training module,
+although this workflow does not otherwise use Geneformer. Install the tested
+Geneformer revision into the dedicated PerturbGen environment:
+
+```bash
+ROOT=/rds/general/user/sho3/projects/lms-scott-raw/live/steve
+PG_ENV="${ROOT}/software/envs/perturbgen"
+GENEFORMER_SRC="${ROOT}/software/src/Geneformer"
+GENEFORMER_REV=04c2b2e84da7c0f385c3f9ad8f3ec24bab6650e5
+
+mkdir -p "${ROOT}/software/src"
+
+GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 \
+  https://huggingface.co/ctheodoris/Geneformer \
+  "${GENEFORMER_SRC}"
+
+git -C "${GENEFORMER_SRC}" fetch --depth 1 origin "${GENEFORMER_REV}"
+
+GIT_LFS_SKIP_SMUDGE=1 git -C "${GENEFORMER_SRC}" \
+  checkout --detach FETCH_HEAD
+
+"${PG_ENV}/bin/python" -m pip install --no-deps "${GENEFORMER_SRC}"
+```
+
+<br>
+
 ## PBS submission
 
 Submit each job with the same workflow config:
@@ -85,6 +113,10 @@ The PBS jobs use
 `CONFIG_PATH` must be absolute so its meaning does not depend on the scheduler
 working directory. Omitting it uses the absolute repository default shown
 above.
+
+Model jobs default to offline Weights & Biases logging, so they do not require
+an API key. After configuring W&B authentication, override this with
+`qsub -v WANDB_MODE=online,...`; use `WANDB_MODE=disabled` to turn logging off.
 
 Decoder training and embedding extraction both use the masking checkpoint, so
 their jobs can run at the same time. After they finish, run the perturbation
