@@ -27,7 +27,7 @@ ADIPOSE_PATH="${ADIPOSE_PATH:-${DATA_DIR}/adipocytes_annotated_step2.h5ad}"
 
 # Conda
 CONDA_BASE="${ROOT}/software/conda/base"
-CONDA_ENV="${ROOT}/software/envs/add"
+CONDA_ENV="/rds/general/user/sho3/projects/lms-scott-raw/live/steve/software/envs/perturbgen"
 
 # PBS logging
 PBS_COMMON="/rds/general/user/sho3/home/pbs_common.sh"

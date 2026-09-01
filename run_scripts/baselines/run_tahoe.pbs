@@ -30,7 +30,7 @@ SIGNATURE_PREFIX="${OUTPUT_DIR}/perturb/tahoe_signatures"
 
 # Conda and workers
 CONDA_BASE="${ROOT}/software/conda/base"
-CONDA_ENV="${ROOT}/software/envs/add"
+CONDA_ENV="/rds/general/user/sho3/projects/lms-scott-raw/live/steve/software/envs/perturbgen"
 ALLOCATED_CPUS="${PBS_NCPUS:-32}"
 WORKERS="${WORKERS:-$((ALLOCATED_CPUS > 1 ? ALLOCATED_CPUS - 1 : 1))}"
 
