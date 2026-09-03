@@ -62,8 +62,8 @@ although this workflow does not otherwise use Geneformer. Install the tested
 Geneformer revision into the dedicated PerturbGen environment:
 
 ```bash
-ROOT=/rds/general/user/sho3/projects/lms-scott-raw/live/steve
-PG_ENV="${ROOT}/software/envs/perturbgen"
+ROOT=/gpfs/home/ap5625
+PG_ENV="${ROOT}/miniforge3/envs/perturbgen"
 GENEFORMER_SRC="${ROOT}/software/src/Geneformer"
 GENEFORMER_REV=04c2b2e84da7c0f385c3f9ad8f3ec24bab6650e5
 
@@ -85,20 +85,17 @@ GIT_LFS_SKIP_SMUDGE=1 git -C "${GENEFORMER_SRC}" \
 
 ## PBS submission
 
-Submit each job with the same workflow config:
+To continue on HX1 after preparation, tokenization, and masking on RDS, submit
+decoder training and embedding extraction with the same transferred masking
+checkpoint:
 
 ```bash
-PROJECT_DIR=/rds/general/user/sho3/projects/lms-scott-raw/live/steve/add
+PROJECT_DIR=/gpfs/home/ap5625/add
 REPO_DIR="${PROJECT_DIR}/adipose_drug_discovery"
 CONFIG_PATH="${REPO_DIR}/run_scripts/perturbgen/config.yaml"
 
-qsub -v CONFIG_PATH="${CONFIG_PATH}" \
-  "${REPO_DIR}/run_scripts/perturbgen/prepare_and_tokenize.pbs"
-qsub -v CONFIG_PATH="${CONFIG_PATH}" \
-  "${REPO_DIR}/run_scripts/perturbgen/train_masking_model.pbs"
-
 # Replace this with the masking checkpoint selected from the preceding job.
-MASKING_CHECKPOINT=/path/to/masking.ckpt
+MASKING_CHECKPOINT="${PROJECT_DIR}/pg_results/adipocytes_obese_weightloss_hvg/masking/checkpoints/selected.ckpt"
 
 qsub \
   -v CONFIG_PATH="${CONFIG_PATH}",MASKING_CHECKPOINT="${MASKING_CHECKPOINT}" \
@@ -108,8 +105,9 @@ qsub \
   "${REPO_DIR}/run_scripts/perturbgen/embedding_extraction.pbs"
 ```
 
-The PBS jobs use
-`/rds/general/user/sho3/projects/lms-scott-raw/live/steve/software/envs/perturbgen`.
+The HX1 PBS jobs use
+`/gpfs/home/ap5625/miniforge3/envs/perturbgen` and source shared PBS functions
+from `/gpfs/home/sho3/pbs_common.sh`.
 `CONFIG_PATH` must be absolute so its meaning does not depend on the scheduler
 working directory. Omitting it uses the absolute repository default shown
 above.

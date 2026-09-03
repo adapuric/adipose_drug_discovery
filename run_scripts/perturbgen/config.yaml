@@ -1,13 +1,13 @@
 project:
-  perturbgen_directory: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/Perturbgen
+  perturbgen_directory: /gpfs/home/ap5625/add/Perturbgen
 
 run:
   run_name: adipocytes_obese_weightloss_hvg
-  results_root_directory: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/pg_results
+  results_root_directory: /gpfs/home/ap5625/add/pg_results
 
 prepare:
-  source_h5ad_path: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/data/adipocytes_annotated_step2.h5ad
-  gene_annotation_path: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/data/mart_export.txt
+  source_h5ad_path: /gpfs/home/ap5625/add/data/adipocytes_annotated_step2.h5ad
+  gene_annotation_path: /gpfs/home/ap5625/add/data/mart_export.txt
   raw_count_layer: raw
   subset_to_highly_variable_genes: true
   highly_variable_gene_col: highly_variable
@@ -36,13 +36,13 @@ tokenize:
   time_point_order:
     - obese
     - weightloss
-  gene_median_dictionary_path: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/data/gene_median_dict_gftokens_gc95M.pkl
-  token_dictionary_path: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/data/token_dict_gftokens_gc95M.pkl
-  ensembl_mapping_path: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/data/ensembl_mapping_dict_gc95M.pkl
+  gene_median_dictionary_path: /gpfs/home/ap5625/add/data/gene_median_dict_gftokens_gc95M.pkl
+  token_dictionary_path: /gpfs/home/ap5625/add/data/token_dict_gftokens_gc95M.pkl
+  ensembl_mapping_path: /gpfs/home/ap5625/add/data/ensembl_mapping_dict_gc95M.pkl
 
 model:
   encoder: scmaskgit
-  encoder_checkpoint_path: /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/data/perturbgen_encoder.ckpt
+  encoder_checkpoint_path: /gpfs/home/ap5625/add/data/perturbgen_encoder.ckpt
   predicted_time_points:
     - 1
   retained_obs_cols:
