@@ -107,4 +107,12 @@ embedding:
   mask_scheduler: pow
 
 perturbation:
-  native_config_path: null
+  decoder_checkpoint_path: null
+  genes_to_perturb: []
+  mode: mask
+  sequence: src
+  n_samples: 3
+  batch_size: 16
+  data_loader_workers: 16
+  precision: 16
+  context_mode: false

@@ -143,9 +143,19 @@ class EmbeddingConfig:
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class PerturbationConfig:
-    """Native PerturbGen inference configuration."""
+    """PerturbGen inference and first-pass summary settings."""
 
-    native_config_path: Path | None
+    decoder_checkpoint_path: Path | None
+    genes_to_perturb: tuple[str, ...] = dataclasses.field(
+        metadata={"allow_empty": True}
+    )
+    mode: str
+    sequence: str
+    n_samples: int
+    batch_size: int
+    data_loader_workers: int
+    precision: int
+    context_mode: bool
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -234,6 +244,11 @@ class PerturbGenConfig:
     def embedding_output_directory(self) -> Path:
         """Embedding output directory for this run."""
         return self.run_directory / "embeddings"
+
+    @property
+    def perturbation_output_directory(self) -> Path:
+        """Perturbation output directory for this run."""
+        return self.run_directory / "perturbation"
 
     @property
     def perturbation_script_path(self) -> Path:
@@ -389,10 +404,14 @@ def _convert_value(
     if expected_type == tuple[str, ...]:
         if isinstance(value, str) or not isinstance(value, Sequence):
             raise ValueError(f"Config value {name!r} must be a list.")
-        converted = tuple(str(item) for item in cast(Sequence[object], value))
-        if not converted and not allow_empty:
+        if converted := tuple(
+            str(item) for item in cast(Sequence[object], value)
+        ):
+            return converted
+        elif allow_empty:
+            return converted
+        else:
             raise ValueError(f"Config value {name!r} must not be empty.")
-        return converted
     raise TypeError(f"Unsupported config type for {name!r}: {expected_type}.")
 
 

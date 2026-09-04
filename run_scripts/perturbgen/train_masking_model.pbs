@@ -6,6 +6,7 @@
 #PBS -m a
 #PBS -j oe
 #PBS -o /gpfs/home/ap5625/add/job_out
+#PBS -W umask=0002
 
 # Train the PerturbGen masking model from existing tokenized data.
 #
@@ -16,6 +17,7 @@
 set -o errexit
 set -o nounset
 set -o pipefail
+umask 0002
 
 # Paths
 ROOT="/gpfs/home/ap5625"

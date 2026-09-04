@@ -25,7 +25,8 @@ python -m run_scripts.perturbgen.extract_embeddings \
 
 python -m run_scripts.perturbgen.run_perturbation \
   --config "${CONFIG_PATH}" \
-  --perturbation-config /path/to/perturbation.yaml
+  --checkpoint /path/to/count_decoder.ckpt \
+  --gene ENSG00000131459
 ```
 
 Every model-launching script supports `--dry-run` which prints the resolved
@@ -38,7 +39,12 @@ pg_results/<run_name>/
 ├── prepared_adipocytes.h5ad
 ├── masking/
 ├── decoder/
-└── embeddings/
+├── embeddings/
+└── perturbation/
+    └── mask_src/<gene>/
+        ├── native_config.yaml
+        ├── <PerturbGen result>.h5ad
+        └── summary/
 ```
 
 PerturbGen creates tokenized data in `tokenized_data/<run_name>` beneath its
@@ -46,8 +52,7 @@ native sibling directory.
 
 Set `prepare.subset_to_highly_variable_genes` to `true` to retain genes marked
 `true` in the source H5AD column named by
-`prepare.highly_variable_gene_col`. This uses the existing gene annotation; it
-does not recalculate highly variable genes. Use a distinct `run.run_name` when
+`prepare.highly_variable_gene_col`. Use a distinct `run.run_name` when
 switching between full-gene and highly-variable-gene inputs.
 
 Checkpoint paths can be written into `config.yaml` or passed with
@@ -104,53 +109,12 @@ qsub \
 qsub \
   -v CONFIG_PATH="${CONFIG_PATH}",MASKING_CHECKPOINT="${MASKING_CHECKPOINT}" \
   "${REPO_DIR}/run_scripts/perturbgen/embedding_extraction.pbs"
+
+# Select the finished count-decoder checkpoint
+COUNT_CHECKPOINT="${PROJECT_DIR}/pg_results/adipocytes_obese_weightloss_hvg/decoder/checkpoints/selected.ckpt"
+PERTURBATION_GENE=ENSG00000131459
+
+qsub \
+  -v CONFIG_PATH="${CONFIG_PATH}",COUNT_CHECKPOINT="${COUNT_CHECKPOINT}",PERTURBATION_GENE="${PERTURBATION_GENE}" \
+  "${REPO_DIR}/run_scripts/perturbgen/run_perturbation.pbs"
 ```
-
-The HX1 PBS jobs use
-`/gpfs/home/ap5625/miniforge3/envs/perturbgen` and source shared PBS functions
-from `/gpfs/home/sho3/pbs_common.sh`.
-`CONFIG_PATH` must be absolute so its meaning does not depend on the scheduler
-working directory. Omitting it uses the absolute repository default shown
-above.
-
-The configured masking command includes
-`--cond_list cell_states_adipocytes`. This is the alias that preparation creates
-from the source H5AD's `cell_state_t2d` annotation, and it must remain in
-`model.retained_obs_cols` and `model.conditioning_obs_cols`. Confirm the
-resolved command before submission with:
-
-```bash
-python -m run_scripts.perturbgen.train_masking \
-  --config "${CONFIG_PATH}" \
-  --dry-run
-```
-
-### HX1 masking-training inputs
-
-When reusing the existing tokenization, the following must be present on HX1:
-
-- the `adipose_drug_discovery` checkout and the PerturbGen `adipose` branch;
-- `/gpfs/home/ap5625/miniforge3/envs/perturbgen` with the required Geneformer
-  revision described above;
-- `/gpfs/home/sho3/pbs_common.sh` and the configured OpenMPI module;
-- `data/perturbgen_encoder.ckpt` beneath the ADD project directory;
-- the complete
-  `T_perturb/tokenized_data/adipocytes_obese_weightloss_hvg` directory,
-  including `dataset_all_src/obese.dataset`, `dataset_all_tgt`,
-  `h5ad_pairing_all_src/obese.h5ad`, `h5ad_pairing_all_tgt`,
-  `token_id_to_genename_all.pkl`, and `tokenid_to_rowid_all.pkl`; and
-- a writable `pg_results/adipocytes_obese_weightloss_hvg/masking` output path.
-
-The original `adipocytes_annotated_step2.h5ad`, `mart_export.txt`, and the three
-tokenization dictionaries are needed only if preparation or tokenization must
-be rerun. Do not resume from a masking checkpoint created with a different
-vocabulary allocation; leave `masking.resume_checkpoint_path` as `null` for a
-fresh compatible model.
-
-Model jobs default to offline Weights & Biases logging, so they do not require
-an API key. After configuring W&B authentication, override this with
-`qsub -v WANDB_MODE=online,...`; use `WANDB_MODE=disabled` to turn logging off.
-
-Decoder training and embedding extraction both use the masking checkpoint, so
-their jobs can run at the same time. After they finish, run the perturbation
-command shown above with the native PerturbGen YAML.
