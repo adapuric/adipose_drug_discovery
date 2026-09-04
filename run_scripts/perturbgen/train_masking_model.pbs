@@ -1,11 +1,11 @@
 #!/bin/bash
 #PBS -N train_masking_model
-#PBS -l select=1:ncpus=8:mem=64gb:ngpus=1:gpu_type=L40S
-#PBS -l walltime=23:59:99
-#PBS -q v1_gpu72
+#PBS -l select=1:ncpus=8:mem=64gb:ngpus=1:gpu_type=A100
+#PBS -l walltime=23:59:59
+#PBS -q hx
 #PBS -m a
 #PBS -j oe
-#PBS -o /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/job_out
+#PBS -o /gpfs/home/ap5625/add/job_out
 
 # Train the PerturbGen masking model from existing tokenized data.
 #
@@ -18,18 +18,18 @@ set -o nounset
 set -o pipefail
 
 # Paths
-ROOT="/rds/general/user/sho3/projects/lms-scott-raw/live/steve"
+ROOT="/gpfs/home/ap5625"
 PROJECT_DIR="${ROOT}/add"
 REPO_DIR="${PROJECT_DIR}/adipose_drug_discovery"
 CONFIG_PATH="${CONFIG_PATH:-${REPO_DIR}/run_scripts/perturbgen/config.yaml}"
 
 # Conda and modules
-CONDA_BASE="${ROOT}/software/conda/base"
-CONDA_ENV="/rds/general/user/sho3/projects/lms-scott-raw/live/steve/software/envs/perturbgen"
+CONDA_BASE="${ROOT}/miniforge3"
+CONDA_ENV="${CONDA_BASE}/envs/perturbgen"
 OPENMPI_MODULE="${OPENMPI_MODULE:-OpenMPI/4.1.6-GCC-13.2.0}"
 
 # PBS logging
-PBS_COMMON="/rds/general/user/sho3/home/pbs_common.sh"
+PBS_COMMON="/gpfs/home/sho3/pbs_common.sh"
 LOG_DIR="${PROJECT_DIR}/job_out"
 JOB_NAME="${PBS_JOBNAME:-train_masking_model}"
 JOB_ID="${PBS_JOBID:-local}"

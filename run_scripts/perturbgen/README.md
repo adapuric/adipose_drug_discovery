@@ -85,14 +85,15 @@ GIT_LFS_SKIP_SMUDGE=1 git -C "${GENEFORMER_SRC}" \
 
 ## PBS submission
 
-To continue on HX1 after preparation, tokenization, and masking on RDS, submit
-decoder training and embedding extraction with the same transferred masking
-checkpoint:
+To train the masking model on HX1 and then run its downstream stages:
 
 ```bash
 PROJECT_DIR=/gpfs/home/ap5625/add
 REPO_DIR="${PROJECT_DIR}/adipose_drug_discovery"
 CONFIG_PATH="${REPO_DIR}/run_scripts/perturbgen/config.yaml"
+
+qsub -v CONFIG_PATH="${CONFIG_PATH}" \
+  "${REPO_DIR}/run_scripts/perturbgen/train_masking_model.pbs"
 
 # Replace this with the masking checkpoint selected from the preceding job.
 MASKING_CHECKPOINT="${PROJECT_DIR}/pg_results/adipocytes_obese_weightloss_hvg/masking/checkpoints/selected.ckpt"
@@ -111,6 +112,40 @@ from `/gpfs/home/sho3/pbs_common.sh`.
 `CONFIG_PATH` must be absolute so its meaning does not depend on the scheduler
 working directory. Omitting it uses the absolute repository default shown
 above.
+
+The configured masking command includes
+`--cond_list cell_states_adipocytes`. This is the alias that preparation creates
+from the source H5AD's `cell_state_t2d` annotation, and it must remain in
+`model.retained_obs_cols` and `model.conditioning_obs_cols`. Confirm the
+resolved command before submission with:
+
+```bash
+python -m run_scripts.perturbgen.train_masking \
+  --config "${CONFIG_PATH}" \
+  --dry-run
+```
+
+### HX1 masking-training inputs
+
+When reusing the existing tokenization, the following must be present on HX1:
+
+- the `adipose_drug_discovery` checkout and the PerturbGen `adipose` branch;
+- `/gpfs/home/ap5625/miniforge3/envs/perturbgen` with the required Geneformer
+  revision described above;
+- `/gpfs/home/sho3/pbs_common.sh` and the configured OpenMPI module;
+- `data/perturbgen_encoder.ckpt` beneath the ADD project directory;
+- the complete
+  `T_perturb/tokenized_data/adipocytes_obese_weightloss_hvg` directory,
+  including `dataset_all_src/obese.dataset`, `dataset_all_tgt`,
+  `h5ad_pairing_all_src/obese.h5ad`, `h5ad_pairing_all_tgt`,
+  `token_id_to_genename_all.pkl`, and `tokenid_to_rowid_all.pkl`; and
+- a writable `pg_results/adipocytes_obese_weightloss_hvg/masking` output path.
+
+The original `adipocytes_annotated_step2.h5ad`, `mart_export.txt`, and the three
+tokenization dictionaries are needed only if preparation or tokenization must
+be rerun. Do not resume from a masking checkpoint created with a different
+vocabulary allocation; leave `masking.resume_checkpoint_path` as `null` for a
+fresh compatible model.
 
 Model jobs default to offline Weights & Biases logging, so they do not require
 an API key. After configuring W&B authentication, override this with
