@@ -123,3 +123,18 @@ qsub \
   -v CONFIG_PATH="${CONFIG_PATH}",DECODER_CHECKPOINT="${DECODER_CHECKPOINT}",PERTURBATION_GENE="${PERTURBATION_GENE}" \
   "${REPO_DIR}/run_scripts/perturbgen/run_perturbation.pbs"
 ```
+
+To run several independent single-gene perturbations sequentially in one PBS
+job, pass a colon-separated `PERTURBATION_GENES` value. PBS reserves commas for
+separating variables supplied through `qsub -v`.
+
+```bash
+PERTURBATION_GENES="ENSG00000131459:ENSG00000123456:ENSG00000198765"
+
+qsub \
+  -v CONFIG_PATH="${CONFIG_PATH}",DECODER_CHECKPOINT="${DECODER_CHECKPOINT}",PERTURBATION_GENES="${PERTURBATION_GENES}" \
+  "${REPO_DIR}/run_scripts/perturbgen/run_perturbation.pbs"
+```
+
+Use `PERTURBATION_GENE` or `PERTURBATION_GENES`, not both. If neither is set,
+the job uses `perturbation.genes_to_perturb` from the YAML configuration.
