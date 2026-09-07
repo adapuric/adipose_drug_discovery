@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import math
+import re
 import shlex
 import subprocess
 from collections.abc import Sequence
@@ -34,6 +36,56 @@ def run_command(
         )
     logger.info("Running: %s", command_text)
     subprocess.run(list(command), cwd=workdir, check=True)
+
+
+def run_training_and_report_checkpoints(
+    command: Sequence[str],
+    *,
+    perturbgen_directory: str | Path,
+    checkpoint_directory: str | Path,
+    stage_name: str,
+    dry_run: bool = False,
+    limit: int = 5,
+) -> None:
+    """Run training and print the new checkpoints with the lowest losses."""
+    checkpoint_dir = Path(checkpoint_directory).expanduser().resolve()
+    existing_checkpoints = set(checkpoint_dir.glob("*.ckpt"))
+    run_command(
+        command,
+        perturbgen_directory=perturbgen_directory,
+        dry_run=dry_run,
+    )
+    if dry_run:
+        return
+
+    new_checkpoints = set(checkpoint_dir.glob("*.ckpt")) - existing_checkpoints
+    ranked_checkpoints: list[tuple[float, int, Path]] = []
+    filename_pattern = re.compile(
+        r"-epoch_(?P<epoch>\d+)-loss_"
+        r"(?P<loss>[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)"
+        r"(?:-v\d+)?\.ckpt$"
+    )
+    for checkpoint in new_checkpoints:
+        match = filename_pattern.search(checkpoint.name)
+        if match is None:
+            continue
+        loss = float(match.group("loss"))
+        if not math.isfinite(loss):
+            continue
+        ranked_checkpoints.append((loss, int(match.group("epoch")), checkpoint))
+
+    if not ranked_checkpoints:
+        raise RuntimeError(
+            f"No loss-labelled {stage_name} checkpoints were created in "
+            f"{checkpoint_dir}."
+        )
+
+    ranked_checkpoints.sort(key=lambda result: (result[0], result[1]))
+    selected = ranked_checkpoints[:limit]
+    print(f"\nBest {len(selected)} {stage_name} checkpoints by loss:")
+    print("rank\tepoch\tloss\tcheckpoint")
+    for rank, (loss, epoch, checkpoint) in enumerate(selected, start=1):
+        print(f"{rank}\t{epoch:02d}\t{loss:.12g}\t{checkpoint}")
 
 
 def model_data_arguments(config: PerturbGenConfig) -> list[str]:

@@ -116,7 +116,7 @@ def resolve_decoder_checkpoint(
     *,
     override: str | Path | None,
 ) -> Path:
-    """Resolve the required count-decoder checkpoint."""
+    """Resolve the required decoder checkpoint."""
     requested = override or config.perturbation.decoder_checkpoint_path
     if requested is None:
         raise ValueError(

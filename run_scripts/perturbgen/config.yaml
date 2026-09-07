@@ -67,7 +67,7 @@ masking:
   data_loader_workers: 4
   mask_scheduler: pow
   use_weighted_sampler: false
-  checkpoint_interval_epochs: 2
+  checkpoint_interval_epochs: 1
   resume_checkpoint_path: null
 
 decoder:
@@ -85,7 +85,7 @@ decoder:
   mask_scheduler: cosine
   use_positional_encoding: false
   use_layer_normalization: true
-  checkpoint_interval_epochs: 5
+  checkpoint_interval_epochs: 1
 
 embedding:
   masking_checkpoint_path: null

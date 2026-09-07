@@ -12,7 +12,7 @@ from run_scripts.perturbgen.config import load_perturbgen_config
 from run_scripts.perturbgen.utils import bool_text
 from run_scripts.perturbgen.utils import checkpoint_path
 from run_scripts.perturbgen.utils import model_data_arguments
-from run_scripts.perturbgen.utils import run_command
+from run_scripts.perturbgen.utils import run_training_and_report_checkpoints
 from run_scripts.perturbgen.utils import shared_model_arguments
 
 
@@ -102,12 +102,14 @@ def main() -> None:
     )
     arguments = _parse_arguments()
     config = load_perturbgen_config(arguments.config)
-    run_command(
+    run_training_and_report_checkpoints(
         build_decoder_command(
             config,
             masking_checkpoint=arguments.checkpoint,
         ),
         perturbgen_directory=config.project.perturbgen_directory,
+        checkpoint_directory=(config.decoder_output_directory / "checkpoints"),
+        stage_name="decoder",
         dry_run=arguments.dry_run,
     )
 

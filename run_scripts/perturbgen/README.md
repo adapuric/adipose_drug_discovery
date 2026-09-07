@@ -25,12 +25,17 @@ python -m run_scripts.perturbgen.extract_embeddings \
 
 python -m run_scripts.perturbgen.run_perturbation \
   --config "${CONFIG_PATH}" \
-  --checkpoint /path/to/count_decoder.ckpt \
+  --checkpoint /path/to/decoder.ckpt \
   --gene ENSG00000131459
 ```
 
 Every model-launching script supports `--dry-run` which prints the resolved
 command without executing it.
+
+Masking and decoder training save one loss-labelled checkpoint per epoch. When
+training finishes, each wrapper prints the five newly created checkpoints with
+the lowest loss values so that a checkpoint can be selected for the next
+stage.
 
 `run.run_name` keeps independent configs separate:
 
@@ -100,7 +105,7 @@ CONFIG_PATH="${REPO_DIR}/run_scripts/perturbgen/config.yaml"
 qsub -v CONFIG_PATH="${CONFIG_PATH}" \
   "${REPO_DIR}/run_scripts/perturbgen/train_masking_model.pbs"
 
-# Replace this with the masking checkpoint selected from the preceding job.
+# Select one of the five lowest-loss masking checkpoints printed by training.
 MASKING_CHECKPOINT="${PROJECT_DIR}/pg_results/adipocytes_obese_weightloss_hvg/masking/checkpoints/selected.ckpt"
 
 qsub \
@@ -110,11 +115,11 @@ qsub \
   -v CONFIG_PATH="${CONFIG_PATH}",MASKING_CHECKPOINT="${MASKING_CHECKPOINT}" \
   "${REPO_DIR}/run_scripts/perturbgen/embedding_extraction.pbs"
 
-# Select the finished count-decoder checkpoint
-COUNT_CHECKPOINT="${PROJECT_DIR}/pg_results/adipocytes_obese_weightloss_hvg/decoder/checkpoints/selected.ckpt"
+# Select one of the five lowest-loss decoder checkpoints printed by training.
+DECODER_CHECKPOINT="${PROJECT_DIR}/pg_results/adipocytes_obese_weightloss_hvg/decoder/checkpoints/selected.ckpt"
 PERTURBATION_GENE=ENSG00000131459
 
 qsub \
-  -v CONFIG_PATH="${CONFIG_PATH}",COUNT_CHECKPOINT="${COUNT_CHECKPOINT}",PERTURBATION_GENE="${PERTURBATION_GENE}" \
+  -v CONFIG_PATH="${CONFIG_PATH}",DECODER_CHECKPOINT="${DECODER_CHECKPOINT}",PERTURBATION_GENE="${PERTURBATION_GENE}" \
   "${REPO_DIR}/run_scripts/perturbgen/run_perturbation.pbs"
 ```
