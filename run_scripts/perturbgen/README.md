@@ -95,7 +95,8 @@ GIT_LFS_SKIP_SMUDGE=1 git -C "${GENEFORMER_SRC}" \
 
 ## PBS submission
 
-To train the masking model on HX1 and then run its downstream stages:
+To prepare and tokenize the adipocytes, train the masking model, and
+then run its downstream stages:
 
 ```bash
 PROJECT_DIR=/gpfs/home/ap5625/add
@@ -103,9 +104,9 @@ REPO_DIR="${PROJECT_DIR}/adipose_drug_discovery"
 CONFIG_PATH="${REPO_DIR}/run_scripts/perturbgen/config.yaml"
 
 qsub -v CONFIG_PATH="${CONFIG_PATH}" \
-  "${REPO_DIR}/run_scripts/perturbgen/train_masking_model.pbs"
+  "${REPO_DIR}/run_scripts/perturbgen/prepare_tokenize_train_masking_model.pbs"
 
-# Select one of the five lowest-loss masking checkpoints printed by training.
+# Select lowest-loss masking checkpoint.
 MASKING_CHECKPOINT="${PROJECT_DIR}/pg_results/adipocytes_obese_weightloss_hvg/masking/checkpoints/selected.ckpt"
 
 qsub \
@@ -115,7 +116,7 @@ qsub \
   -v CONFIG_PATH="${CONFIG_PATH}",MASKING_CHECKPOINT="${MASKING_CHECKPOINT}" \
   "${REPO_DIR}/run_scripts/perturbgen/embedding_extraction.pbs"
 
-# Select one of the five lowest-loss decoder checkpoints printed by training.
+# Select lowest-loss decoder checkpoint.
 DECODER_CHECKPOINT="${PROJECT_DIR}/pg_results/adipocytes_obese_weightloss_hvg/decoder/checkpoints/selected.ckpt"
 PERTURBATION_GENE=ENSG00000131459
 
