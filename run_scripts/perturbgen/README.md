@@ -99,19 +99,25 @@ To prepare and tokenize the adipocytes, train the masking model, and
 then run its downstream stages:
 
 ```bash
+# Prepare environment variables
 PROJECT_DIR=/gpfs/home/ap5625/add
 REPO_DIR="${PROJECT_DIR}/adipose_drug_discovery"
 CONFIG_PATH="${REPO_DIR}/run_scripts/perturbgen/config.yaml"
 
+# Submit prepare + masking model job
 qsub -v CONFIG_PATH="${CONFIG_PATH}" \
   "${REPO_DIR}/run_scripts/perturbgen/prepare_tokenize_train_masking_model.pbs"
 
 # Select lowest-loss masking checkpoint.
 MASKING_CHECKPOINT="${PROJECT_DIR}/pg_results/adipocytes_obese_weightloss_hvg/masking/checkpoints/selected.ckpt"
 
+# Decoder and embedding extraction jobs can be submitted once masking model is complete
+# Submit decoder job
 qsub \
   -v CONFIG_PATH="${CONFIG_PATH}",MASKING_CHECKPOINT="${MASKING_CHECKPOINT}" \
   "${REPO_DIR}/run_scripts/perturbgen/train_decoder.pbs"
+
+# Submit embedding extraction job
 qsub \
   -v CONFIG_PATH="${CONFIG_PATH}",MASKING_CHECKPOINT="${MASKING_CHECKPOINT}" \
   "${REPO_DIR}/run_scripts/perturbgen/embedding_extraction.pbs"
@@ -120,6 +126,7 @@ qsub \
 DECODER_CHECKPOINT="${PROJECT_DIR}/pg_results/adipocytes_obese_weightloss_hvg/decoder/checkpoints/selected.ckpt"
 PERTURBATION_GENE=ENSG00000131459
 
+# Submit perturbation run
 qsub \
   -v CONFIG_PATH="${CONFIG_PATH}",DECODER_CHECKPOINT="${DECODER_CHECKPOINT}",PERTURBATION_GENE="${PERTURBATION_GENE}" \
   "${REPO_DIR}/run_scripts/perturbgen/run_perturbation.pbs"
