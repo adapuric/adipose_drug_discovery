@@ -25,11 +25,17 @@ python -m run_scripts.perturbgen.extract_embeddings \
 
 python -m run_scripts.perturbgen.run_perturbation \
   --config "${CONFIG_PATH}" \
-  --perturbation-config /path/to/perturbation.yaml
+  --checkpoint /path/to/decoder.ckpt \
+  --gene ENSG00000131459
 ```
 
 Every model-launching script supports `--dry-run` which prints the resolved
 command without executing it.
+
+Masking and decoder training save one loss-labelled checkpoint per epoch. When
+training finishes, each wrapper prints the five newly created checkpoints with
+the lowest loss values so that a checkpoint can be selected for the next
+stage.
 
 `run.run_name` keeps independent configs separate:
 
@@ -38,7 +44,12 @@ pg_results/<run_name>/
 ├── prepared_adipocytes.h5ad
 ├── masking/
 ├── decoder/
-└── embeddings/
+├── embeddings/
+└── perturbation/
+    └── mask_src/<gene>/
+        ├── native_config.yaml
+        ├── <PerturbGen result>.h5ad
+        └── summary/
 ```
 
 PerturbGen creates tokenized data in `tokenized_data/<run_name>` beneath its
@@ -46,8 +57,7 @@ native sibling directory.
 
 Set `prepare.subset_to_highly_variable_genes` to `true` to retain genes marked
 `true` in the source H5AD column named by
-`prepare.highly_variable_gene_col`. This uses the existing gene annotation; it
-does not recalculate highly variable genes. Use a distinct `run.run_name` when
+`prepare.highly_variable_gene_col`. Use a distinct `run.run_name` when
 switching between full-gene and highly-variable-gene inputs.
 
 Checkpoint paths can be written into `config.yaml` or passed with
@@ -62,8 +72,8 @@ although this workflow does not otherwise use Geneformer. Install the tested
 Geneformer revision into the dedicated PerturbGen environment:
 
 ```bash
-ROOT=/rds/general/user/sho3/projects/lms-scott-raw/live/steve
-PG_ENV="${ROOT}/software/envs/perturbgen"
+ROOT=/gpfs/home/ap5625
+PG_ENV="${ROOT}/miniforge3/envs/perturbgen"
 GENEFORMER_SRC="${ROOT}/software/src/Geneformer"
 GENEFORMER_REV=04c2b2e84da7c0f385c3f9ad8f3ec24bab6650e5
 
@@ -85,39 +95,54 @@ GIT_LFS_SKIP_SMUDGE=1 git -C "${GENEFORMER_SRC}" \
 
 ## PBS submission
 
-Submit each job with the same workflow config:
+To prepare and tokenize the adipocytes, train the masking model, and
+then run its downstream stages:
 
 ```bash
-PROJECT_DIR=/rds/general/user/sho3/projects/lms-scott-raw/live/steve/add
+# Prepare environment variables
+PROJECT_DIR=/gpfs/home/ap5625/add
 REPO_DIR="${PROJECT_DIR}/adipose_drug_discovery"
 CONFIG_PATH="${REPO_DIR}/run_scripts/perturbgen/config.yaml"
 
+# Submit prepare + masking model job
 qsub -v CONFIG_PATH="${CONFIG_PATH}" \
-  "${REPO_DIR}/run_scripts/perturbgen/prepare_and_tokenize.pbs"
-qsub -v CONFIG_PATH="${CONFIG_PATH}" \
-  "${REPO_DIR}/run_scripts/perturbgen/train_masking_model.pbs"
+  "${REPO_DIR}/run_scripts/perturbgen/prepare_tokenize_train_masking_model.pbs"
 
-# Replace this with the masking checkpoint selected from the preceding job.
-MASKING_CHECKPOINT=/path/to/masking.ckpt
+# Select lowest-loss masking checkpoint.
+MASKING_CHECKPOINT="${PROJECT_DIR}/pg_results/adipocytes_obese_weightloss_hvg/masking/checkpoints/selected.ckpt"
 
+# Decoder and embedding extraction jobs can be submitted once masking model is complete
+# Submit decoder job
 qsub \
   -v CONFIG_PATH="${CONFIG_PATH}",MASKING_CHECKPOINT="${MASKING_CHECKPOINT}" \
   "${REPO_DIR}/run_scripts/perturbgen/train_decoder.pbs"
+
+# Submit embedding extraction job
 qsub \
   -v CONFIG_PATH="${CONFIG_PATH}",MASKING_CHECKPOINT="${MASKING_CHECKPOINT}" \
   "${REPO_DIR}/run_scripts/perturbgen/embedding_extraction.pbs"
+
+# Select lowest-loss decoder checkpoint.
+DECODER_CHECKPOINT="${PROJECT_DIR}/pg_results/adipocytes_obese_weightloss_hvg/decoder/checkpoints/selected.ckpt"
+PERTURBATION_GENE=ENSG00000131459
+
+# Submit perturbation run
+qsub \
+  -v CONFIG_PATH="${CONFIG_PATH}",DECODER_CHECKPOINT="${DECODER_CHECKPOINT}",PERTURBATION_GENE="${PERTURBATION_GENE}" \
+  "${REPO_DIR}/run_scripts/perturbgen/run_perturbation.pbs"
 ```
 
-The PBS jobs use
-`/rds/general/user/sho3/projects/lms-scott-raw/live/steve/software/envs/perturbgen`.
-`CONFIG_PATH` must be absolute so its meaning does not depend on the scheduler
-working directory. Omitting it uses the absolute repository default shown
-above.
+To run several independent single-gene perturbations sequentially in one PBS
+job, pass a colon-separated `PERTURBATION_GENES` value. PBS reserves commas for
+separating variables supplied through `qsub -v`.
 
-Model jobs default to offline Weights & Biases logging, so they do not require
-an API key. After configuring W&B authentication, override this with
-`qsub -v WANDB_MODE=online,...`; use `WANDB_MODE=disabled` to turn logging off.
+```bash
+PERTURBATION_GENES="ENSG00000131459:ENSG00000123456:ENSG00000198765"
 
-Decoder training and embedding extraction both use the masking checkpoint, so
-their jobs can run at the same time. After they finish, run the perturbation
-command shown above with the native PerturbGen YAML.
+qsub \
+  -v CONFIG_PATH="${CONFIG_PATH}",DECODER_CHECKPOINT="${DECODER_CHECKPOINT}",PERTURBATION_GENES="${PERTURBATION_GENES}" \
+  "${REPO_DIR}/run_scripts/perturbgen/run_perturbation.pbs"
+```
+
+Use `PERTURBATION_GENE` or `PERTURBATION_GENES`, not both. If neither is set,
+the job uses `perturbation.genes_to_perturb` from the YAML configuration.

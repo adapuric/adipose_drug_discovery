@@ -11,7 +11,7 @@ from run_scripts.perturbgen.config import PerturbGenConfig
 from run_scripts.perturbgen.config import load_perturbgen_config
 from run_scripts.perturbgen.utils import bool_text
 from run_scripts.perturbgen.utils import model_data_arguments
-from run_scripts.perturbgen.utils import run_command
+from run_scripts.perturbgen.utils import run_training_and_report_checkpoints
 from run_scripts.perturbgen.utils import shared_model_arguments
 
 
@@ -85,9 +85,11 @@ def main() -> None:
     )
     arguments = _parse_arguments()
     config = load_perturbgen_config(arguments.config)
-    run_command(
+    run_training_and_report_checkpoints(
         build_masking_command(config),
         perturbgen_directory=config.project.perturbgen_directory,
+        checkpoint_directory=(config.masking_output_directory / "checkpoints"),
+        stage_name="masking-model",
         dry_run=arguments.dry_run,
     )
 

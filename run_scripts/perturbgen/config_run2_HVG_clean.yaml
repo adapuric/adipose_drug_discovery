@@ -2,14 +2,14 @@ project:
   perturbgen_directory: /gpfs/home/ap5625/add/Perturbgen
 
 run:
-  run_name: adipocytes_obese_weightloss_hvg
+  run_name: adipocytes_run2_obese_weightloss_hvg_clean
   results_root_directory: /gpfs/home/ap5625/add/pg_results
 
 prepare:
-  source_h5ad_path: /gpfs/home/ap5625/add/data/adipocytes_annotated_step2.h5ad
+  source_h5ad_path: /gpfs/home/ap5625/add/data/preprocessed_hvg/adipocytes_preprocessed_hvg.h5ad
   gene_annotation_path: /gpfs/home/ap5625/add/data/mart_export.txt
   raw_count_layer: raw
-  subset_to_highly_variable_genes: true
+  subset_to_highly_variable_genes: false
   highly_variable_gene_col: highly_variable
   donor_col: Donor
   condition_col: condition
