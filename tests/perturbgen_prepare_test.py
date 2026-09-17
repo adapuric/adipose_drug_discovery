@@ -72,7 +72,7 @@ def test_preparation_keeps_only_required_paired_raw_data(
     ).to_csv(annotation_path, sep="\t", index=False)
     repository = Path(__file__).parents[1]
     config = load_perturbgen_config(
-        repository / "run_scripts" / "perturbgen" / "config.yaml"
+        repository / "run_scripts" / "perturbgen" / "configs" / "config.yaml"
     )
     config = dataclasses.replace(
         config,

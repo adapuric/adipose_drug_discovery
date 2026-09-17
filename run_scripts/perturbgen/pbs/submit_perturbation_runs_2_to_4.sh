@@ -1,10 +1,12 @@
+#!/bin/bash
+
 PROJECT_DIR=/gpfs/home/ap5625/add
 REPO_DIR="${PROJECT_DIR}/adipose_drug_discovery"
 
 CONFIG_PATHS=(
-  "${REPO_DIR}/run_scripts/perturbgen/config_run2_HVG_clean.yaml"
-  "${REPO_DIR}/run_scripts/perturbgen/config_run3_HVG_mergedannot.yaml"
-  "${REPO_DIR}/run_scripts/perturbgen/config_run4_HVG_noAD1.yaml"
+  "${REPO_DIR}/run_scripts/perturbgen/configs/config_run2_HVG_clean.yaml"
+  "${REPO_DIR}/run_scripts/perturbgen/configs/config_run3_HVG_mergedannot.yaml"
+  "${REPO_DIR}/run_scripts/perturbgen/configs/config_run4_HVG_noAD1.yaml"
 )
 
 DECODER_CHECKPOINTS=(
@@ -19,5 +21,5 @@ PERTURBATION_GENES="ENSG00000105835:ENSG00000124762:ENSG00000131459"
 for i in "${!CONFIG_PATHS[@]}"; do
   CONFIG_PATH="${CONFIG_PATHS[$i]}"
   DECODER_CHECKPOINT="${DECODER_CHECKPOINTS[$i]}"
-  qsub -v CONFIG_PATH="${CONFIG_PATH}",DECODER_CHECKPOINT="${DECODER_CHECKPOINT}",PERTURBATION_GENES="${PERTURBATION_GENES}" "${REPO_DIR}/run_scripts/perturbgen/run_perturbation.pbs"
+  qsub -v CONFIG_PATH="${CONFIG_PATH}",DECODER_CHECKPOINT="${DECODER_CHECKPOINT}",PERTURBATION_GENES="${PERTURBATION_GENES}" "${REPO_DIR}/run_scripts/perturbgen/pbs/run_perturbation.pbs"
 done

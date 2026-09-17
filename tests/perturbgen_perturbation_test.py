@@ -27,7 +27,7 @@ def test_native_config_wires_count_checkpoint_and_separate_gene(
     """Generated native YAML uses the selected decoder and active run paths."""
     repository = Path(__file__).parents[1]
     config = load_perturbgen_config(
-        repository / "run_scripts" / "perturbgen" / "config.yaml"
+        repository / "run_scripts" / "perturbgen" / "configs" / "config.yaml"
     )
     config = dataclasses.replace(
         config,

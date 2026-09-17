@@ -275,7 +275,7 @@ def _parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=Path,
-        default=Path(__file__).with_name("config.yaml"),
+        default=Path(__file__).parent / "configs" / "config.yaml",
     )
     return parser.parse_args()
 

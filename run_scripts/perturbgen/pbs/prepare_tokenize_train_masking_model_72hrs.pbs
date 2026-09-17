@@ -12,7 +12,7 @@
 #
 # Submit from the repository root with a workflow config:
 #   qsub -v CONFIG_PATH=/path/to/config.yaml \
-#     run_scripts/perturbgen/prepare_tokenize_train_masking_model.pbs
+#     run_scripts/perturbgen/pbs/prepare_tokenize_train_masking_model.pbs
 
 set -o errexit
 set -o nounset
@@ -23,7 +23,7 @@ umask 0002
 ROOT="/gpfs/home/ap5625"
 PROJECT_DIR="${ROOT}/add"
 REPO_DIR="${PROJECT_DIR}/adipose_drug_discovery"
-CONFIG_PATH="${CONFIG_PATH:-${REPO_DIR}/run_scripts/perturbgen/config.yaml}"
+CONFIG_PATH="${CONFIG_PATH:-${REPO_DIR}/run_scripts/perturbgen/configs/config.yaml}"
 
 # Conda and modules
 CONDA_BASE="${ROOT}/miniforge3"

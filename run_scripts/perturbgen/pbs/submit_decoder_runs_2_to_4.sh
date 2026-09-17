@@ -1,10 +1,12 @@
+#!/bin/bash
+
 PROJECT_DIR=/gpfs/home/ap5625/add
 REPO_DIR="${PROJECT_DIR}/adipose_drug_discovery"
 
 CONFIG_PATHS=(
-  "${REPO_DIR}/run_scripts/perturbgen/config_run2_HVG_clean.yaml"
-  "${REPO_DIR}/run_scripts/perturbgen/config_run3_HVG_mergedannot.yaml"
-  "${REPO_DIR}/run_scripts/perturbgen/config_run4_HVG_noAD1.yaml"
+  "${REPO_DIR}/run_scripts/perturbgen/configs/config_run2_HVG_clean.yaml"
+  "${REPO_DIR}/run_scripts/perturbgen/configs/config_run3_HVG_mergedannot.yaml"
+  "${REPO_DIR}/run_scripts/perturbgen/configs/config_run4_HVG_noAD1.yaml"
 )
 
 MASKING_CHECKPOINTS=(
@@ -16,6 +18,6 @@ MASKING_CHECKPOINTS=(
 for i in "${!CONFIG_PATHS[@]}"; do
   CONFIG_PATH="${CONFIG_PATHS[$i]}"
   MASKING_CHECKPOINT="${MASKING_CHECKPOINTS[$i]}"
-  qsub -v CONFIG_PATH="${CONFIG_PATH}",MASKING_CHECKPOINT="${MASKING_CHECKPOINT}" "${REPO_DIR}/run_scripts/perturbgen/train_decoder.pbs"
-  qsub -v CONFIG_PATH="${CONFIG_PATH}",MASKING_CHECKPOINT="${MASKING_CHECKPOINT}" "${REPO_DIR}/run_scripts/perturbgen/embedding_extraction.pbs"
+  qsub -v CONFIG_PATH="${CONFIG_PATH}",MASKING_CHECKPOINT="${MASKING_CHECKPOINT}" "${REPO_DIR}/run_scripts/perturbgen/pbs/train_decoder.pbs"
+  qsub -v CONFIG_PATH="${CONFIG_PATH}",MASKING_CHECKPOINT="${MASKING_CHECKPOINT}" "${REPO_DIR}/run_scripts/perturbgen/pbs/embedding_extraction.pbs"
 done

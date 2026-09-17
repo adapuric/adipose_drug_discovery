@@ -1,5 +1,9 @@
 # PerturbGen run scripts
 
+YAML configurations live in `configs/`; submission scripts and PBS jobs live
+in `pbs/`. Python entry points remain in this directory and default to
+`configs/config.yaml`.
+
 The workflow is:
 
 ```text
@@ -102,11 +106,11 @@ then run its downstream stages:
 # Prepare environment variables
 PROJECT_DIR=/gpfs/home/ap5625/add
 REPO_DIR="${PROJECT_DIR}/adipose_drug_discovery"
-CONFIG_PATH="${REPO_DIR}/run_scripts/perturbgen/config.yaml"
+CONFIG_PATH="${REPO_DIR}/run_scripts/perturbgen/configs/config.yaml"
 
 # Submit prepare + masking model job
 qsub -v CONFIG_PATH="${CONFIG_PATH}" \
-  "${REPO_DIR}/run_scripts/perturbgen/prepare_tokenize_train_masking_model.pbs"
+  "${REPO_DIR}/run_scripts/perturbgen/pbs/prepare_tokenize_train_masking_model.pbs"
 
 # Select lowest-loss masking checkpoint.
 MASKING_CHECKPOINT="${PROJECT_DIR}/pg_results/adipocytes_obese_weightloss_hvg/masking/checkpoints/selected.ckpt"
@@ -115,12 +119,12 @@ MASKING_CHECKPOINT="${PROJECT_DIR}/pg_results/adipocytes_obese_weightloss_hvg/ma
 # Submit decoder job
 qsub \
   -v CONFIG_PATH="${CONFIG_PATH}",MASKING_CHECKPOINT="${MASKING_CHECKPOINT}" \
-  "${REPO_DIR}/run_scripts/perturbgen/train_decoder.pbs"
+  "${REPO_DIR}/run_scripts/perturbgen/pbs/train_decoder.pbs"
 
 # Submit embedding extraction job
 qsub \
   -v CONFIG_PATH="${CONFIG_PATH}",MASKING_CHECKPOINT="${MASKING_CHECKPOINT}" \
-  "${REPO_DIR}/run_scripts/perturbgen/embedding_extraction.pbs"
+  "${REPO_DIR}/run_scripts/perturbgen/pbs/embedding_extraction.pbs"
 
 # Select lowest-loss decoder checkpoint.
 DECODER_CHECKPOINT="${PROJECT_DIR}/pg_results/adipocytes_obese_weightloss_hvg/decoder/checkpoints/selected.ckpt"
@@ -129,7 +133,7 @@ PERTURBATION_GENE=ENSG00000131459
 # Submit perturbation run
 qsub \
   -v CONFIG_PATH="${CONFIG_PATH}",DECODER_CHECKPOINT="${DECODER_CHECKPOINT}",PERTURBATION_GENE="${PERTURBATION_GENE}" \
-  "${REPO_DIR}/run_scripts/perturbgen/run_perturbation.pbs"
+  "${REPO_DIR}/run_scripts/perturbgen/pbs/run_perturbation.pbs"
 ```
 
 To run several independent single-gene perturbations sequentially in one PBS
@@ -141,7 +145,7 @@ PERTURBATION_GENES="ENSG00000131459:ENSG00000123456:ENSG00000198765"
 
 qsub \
   -v CONFIG_PATH="${CONFIG_PATH}",DECODER_CHECKPOINT="${DECODER_CHECKPOINT}",PERTURBATION_GENES="${PERTURBATION_GENES}" \
-  "${REPO_DIR}/run_scripts/perturbgen/run_perturbation.pbs"
+  "${REPO_DIR}/run_scripts/perturbgen/pbs/run_perturbation.pbs"
 ```
 
 Use `PERTURBATION_GENE` or `PERTURBATION_GENES`, not both. If neither is set,
