@@ -93,7 +93,7 @@ embedding:
     - cell_pairing_index
     - cell_states_adipocytes
     - condition
-  batch_size: 64
+  batch_size: 32
   data_loader_workers: 16
   return_cell_embeddings: true
   return_attention: false

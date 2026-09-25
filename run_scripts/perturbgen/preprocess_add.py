@@ -1,4 +1,3 @@
-
 """Preprocess AnnData before the PerturbGen workflow."""
 
 import argparse
@@ -7,9 +6,10 @@ from pathlib import Path
 from typing import cast
 
 import anndata as ad  # type: ignore[import]
+import numpy as np
 import pandas as pd
 import scanpy as sc  # type: ignore[import]
-import numpy as np
+
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +19,8 @@ def preprocess_adipose_adata(
     output_adata: Path,
     max_pct_mito: float | None = None,
     max_pct_ribo: float | None = None,
+    remove_mito: bool = False,
+    remove_ribo: bool = False,
     remove_ensembl: bool = False,
     remove_lncrnas: bool = False,
     select_hvgs: bool = False,
@@ -26,7 +28,7 @@ def preprocess_adipose_adata(
     batch_key: str | None = None,
     n_top_genes: int | None = None,
     max_pct_cells: float | None = None,
-    state_col: str | None = None, 
+    state_col: str | None = None,
     min_pct_in_state: float | None = None,
 ) -> None:
     """Preprocess adipocyte AnnData for PerturbGen tokenization.
@@ -36,6 +38,8 @@ def preprocess_adipose_adata(
       output_adata: Path for the preprocessed H5AD file.
       max_pct_mito: Maximum mitochondrial percentage, or None to skip filtering.
       max_pct_ribo: Maximum ribosomal percentage, or None to skip filtering.
+      remove_mito: Whether to remove mitochondrial genes.
+      remove_ribo: Whether to remove ribosomal genes.
       remove_ensembl: Whether to remove unmapped Ensembl identifiers.
       remove_lncrnas: Whether to remove antisense lncRNA genes.
       select_hvgs: Whether to subset to highly variable genes.
@@ -45,10 +49,13 @@ def preprocess_adipose_adata(
         all genes marked highly variable in the source H5AD.
       batch_key: Column in adata.obs marking batch membership, or None to ignore
         batch when selecting highly variable genes.
-      max_pct_cells: Maximum allowed percentage of cells expressing a gene, computed globally across all cells. Genes above this threshold are
+      max_pct_cells: Maximum allowed percentage of cells expressing a gene,
+        computed globally across all cells. Genes above this threshold are
         removed as ubiquitously expressed (ex: housekeeping genes).
-      state_col: Column in adata.obs identifying the annotated cell state per cell. Required if min_pct_in_state is set.
-      min_pct_in_state: Minimum percentage of cells expressing a gene required in at least one state. 
+      state_col: Column in adata.obs identifying the annotated cell state per
+        cell. Required if min_pct_in_state is set.
+      min_pct_in_state: Minimum percentage of cells expressing a gene required
+        in at least one state.
     """
     adata = ad.read_h5ad(input_adata)
 
@@ -57,6 +64,12 @@ def preprocess_adipose_adata(
 
     if max_pct_ribo is not None:
         adata = _filter_cells_by_ribo_pct(adata, max_pct_ribo)
+
+    if remove_mito:
+        adata = _remove_mito_genes(adata)
+
+    if remove_ribo:
+        adata = _remove_ribo_genes(adata)
 
     if remove_ensembl:
         adata = _remove_ensembl_genes(adata)
@@ -75,9 +88,12 @@ def preprocess_adipose_adata(
         adata = _remove_wide_genes(adata, max_pct_cells)
     if min_pct_in_state is not None:
         if state_col is None:
-            raise ValueError("state_col is required when min_pct_in_state is set.")
-        adata = _filter_genes_by_expression_in_cellstates(adata, state_col, min_pct_in_state)
-
+            raise ValueError(
+                "state_col is required when min_pct_in_state is set."
+            )
+        adata = _filter_genes_by_expression_in_cellstates(
+            adata, state_col, min_pct_in_state
+        )
 
     output_adata.parent.mkdir(parents=True, exist_ok=True)
     adata.write_h5ad(output_adata)
@@ -122,6 +138,32 @@ def _filter_cells_by_ribo_pct(
     """
     keep = adata.obs["pct_counts_ribo"] <= max_pct_ribo
     return adata[keep]
+
+
+def _remove_mito_genes(adata: ad.AnnData) -> ad.AnnData:
+    """Remove mitochondrial genes.
+
+    Args:
+      adata: Annotated data matrix with cells as observations.
+
+    Returns:
+      AnnData containing no mitochondrial genes.
+    """
+    is_mito = adata.var.index.to_series().str.startswith("MT-")
+    return adata[:, ~is_mito]
+
+
+def _remove_ribo_genes(adata: ad.AnnData) -> ad.AnnData:
+    """Remove ribosomal genes.
+
+    Args:
+      adata: Annotated data matrix with cells as observations.
+
+    Returns:
+      AnnData containing no ribosomal genes.
+    """
+    is_ribo = adata.var.index.to_series().str.startswith(("RPS", "RPL"))
+    return adata[:, ~is_ribo]
 
 
 def _remove_ensembl_genes(adata: ad.AnnData) -> ad.AnnData:
@@ -192,66 +234,74 @@ def _select_highly_variable_genes(
     return cast(ad.AnnData, adata[:, keep_genes])
 
 
-
-
-
 def _remove_wide_genes(
-    adata: ad.AnnData, 
-    max_pct_cells: float, 
-) -> ad.AnnData: 
-    """Filter out genes that are expressed in over 95% of nuclei as they are ubiquitous 
+    adata: ad.AnnData,
+    max_pct_cells: float,
+) -> ad.AnnData:
+    """Filter out genes that are expressed in over 95% of nuclei as they are
+    ubiquitous.
 
-    Args: 
-    adata: Annotated data matrix with cells as observations.
-    max_pct_cells: % expression of genes in nuclei to retain 
+    Args:
+      adata: Annotated data matrix with cells as observations.
+      max_pct_cells: % expression of genes in nuclei to retain
 
-    Output: 
-    AnnData containing no genes expressed in OVER 95% of nuclei   
-    
+    Output:
+    AnnData containing no genes expressed in OVER 95% of nuclei
+
     """
     counts = adata.layers["raw"]
-    pct_expressing = np.asarray((counts > 0).sum(axis=0)).ravel() / adata.n_obs * 100
+    pct_expressing = (
+        np.asarray((counts > 0).sum(axis=0)).ravel() / adata.n_obs * 100
+    )
     keep = pct_expressing <= max_pct_cells
     return adata[:, keep]
 
 
-
 def _filter_genes_by_expression_in_cellstates(
-    adata: ad.AnnData, 
+    adata: ad.AnnData,
     state_col: str,
     min_pct_in_state: float,
 ) -> ad.AnnData:
-    """Subset to genes expressed in at least 10% of cells, in at least one of the cell states 
+    """Subset to genes expressed in at least 10% of cells, in at least one of
+    the cell states.
 
-    Args: 
-    adata: Annotated data matrix with cells as observations.
-    state_col: annotation column of cell stes in AnnData
-    min_pct_in_state: % expression 
+    Args:
+      adata: Annotated data matrix with cells as observations.
+      state_col: annotation column of cell stes in AnnData
+      min_pct_in_state: % expression
 
-    Output: 
-    AnnData with removed genes that are expressed in 95% of nuclei / cells (uniquotusu) 
-    
+    Output:
+      AnnData with removed genes that are expressed in 95% of nuclei / cells
+      (uniquoitous)
+
     """
-    counts = adata.layers["raw"] # take raw count matrix 
-    max_pct_across_states = np.zeros(adata.n_vars) # each entry holds that gene's highest % expressing value across all states
+    counts = adata.layers["raw"]  # take raw count matrix
+    max_pct_across_states = np.zeros(
+        adata.n_vars
+    )  # each entry holds a gene's highest % expressing
+    # value across all states
 
-    for state in adata.obs[state_col].unique(): # loop, one check per state 
-        state_mask = (adata.obs[state_col] == state).to_numpy() # checks if nuclei belongs to the cell state 
-        state_counts = counts[state_mask] # subsets count matrix to only the cells in this state
+    for state in adata.obs[state_col].unique():  # loop, one check per state
+        state_mask = (
+            adata.obs[state_col] == state
+        ).to_numpy()  # checks if nuclei belongs to the cell state
+        state_counts = counts[
+            state_mask
+        ]  # subsets count matrix to only the cells in this state
         pct_expressing = (
-            np.asarray((state_counts > 0).sum(axis=0)).ravel() / state_mask.sum() * 100
+            np.asarray((state_counts > 0).sum(axis=0)).ravel()
+            / state_mask.sum()
+            * 100
         )
         # per gene comparison btw current best and this state's computed %s
-        max_pct_across_states = np.maximum(max_pct_across_states, pct_expressing) 
-        # after all states are processed, each gene's final value is its single highest % expressing score
+        max_pct_across_states = np.maximum(
+            max_pct_across_states, pct_expressing
+        )
+        # after all states are processed, each gene's final value is its single
+        # highest % expressing score
 
     keep = max_pct_across_states >= min_pct_in_state
     return adata[:, keep]
-
-
-    
-
-    
 
 
 def _parse_arguments() -> argparse.Namespace:
@@ -261,6 +311,8 @@ def _parse_arguments() -> argparse.Namespace:
     parser.add_argument("output_adata", type=Path)
     parser.add_argument("--max-pct-mito", type=float)
     parser.add_argument("--max-pct-ribo", type=float)
+    parser.add_argument("--remove-mito", action="store_true")
+    parser.add_argument("--remove-ribo", action="store_true")
     parser.add_argument("--remove-ensembl", action="store_true")
     parser.add_argument("--remove-lncrnas", action="store_true")
     parser.add_argument("--select-hvgs", action="store_true")
@@ -269,7 +321,7 @@ def _parse_arguments() -> argparse.Namespace:
     parser.add_argument("--max-pct-cells", type=float, default=None)
     parser.add_argument("--state-col", default=None)
     parser.add_argument("--min-pct-in-state", type=float, default=None)
-    
+
     parser.add_argument(
         "--highly-variable-gene-col",
         default="highly_variable",
@@ -290,6 +342,8 @@ def main() -> None:
         output_adata=arguments.output_adata,
         max_pct_mito=arguments.max_pct_mito,
         max_pct_ribo=arguments.max_pct_ribo,
+        remove_mito=arguments.remove_mito,
+        remove_ribo=arguments.remove_ribo,
         remove_ensembl=arguments.remove_ensembl,
         remove_lncrnas=arguments.remove_lncrnas,
         select_hvgs=arguments.select_hvgs,
