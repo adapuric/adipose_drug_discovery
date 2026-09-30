@@ -50,6 +50,13 @@ def build_native_perturbation_config(
     }
     if config.model.conditioning_obs_cols:
         data["cond_list"] = list(config.model.conditioning_obs_cols)
+    # PerturbGen needs `pert_tps` to select target nuclei for knockout edits;
+    # every predicted time point matches its default of editing all of them.
+    target_options: dict[str, object] = (
+        {"pert_tps": predicted_time_points}
+        if settings.sequence == "tgt"
+        else {}
+    )
 
     return {
         "data": data,
@@ -80,6 +87,7 @@ def build_native_perturbation_config(
             "perturbation_sequence": [settings.sequence],
             "var_list": list(config.model.retained_obs_cols),
             "pred_tps": predicted_time_points,
+            **target_options,
         },
         "datamodule": {
             "batch_size": settings.batch_size,

@@ -222,3 +222,8 @@ qsub \
   -v CONFIG_PATH="${CONFIG_PATH}",DECODER_CHECKPOINT="${DECODER_CHECKPOINT}",PERTURBATION_GENES="${PERTURBATION_GENES}",PERTURBATION_SEQUENCE=tgt \
   "${REPO_DIR}/run_scripts/perturbgen/pbs/run_perturbation.pbs"
 ```
+
+A `tgt` run edits the gene in the target-condition sequence at every
+`model.predicted_time_points` value, passed to PerturbGen as `pert_tps`. For
+"mask", "pad", and "delete", PerturbGen keeps only pairs whose target nucleus
+expresses the gene at those time points.
