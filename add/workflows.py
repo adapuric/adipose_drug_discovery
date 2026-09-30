@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.metadata
+import json
 import logging
 import re
 from collections.abc import Mapping
@@ -24,6 +25,7 @@ from add.baselines import score_cmap
 from add.baselines import score_mean_drug
 from add.baselines import score_pca_ridge
 from add.baselines import score_train_mean
+from add.baselines import split_signature_contexts
 from add.data import AnalysisConfig
 from add.data import file_identity
 from add.data import load_adipose
@@ -350,6 +352,16 @@ def cache_perturbation_signatures(
                 section.get("perturbation_type_col")
             ),
             compound_type=_optional_string(section.get("compound_type")),
+            quality_col=_optional_string(section.get("quality_col")),
+            minimum_quality=(
+                _float_value(section, "minimum_quality", "lincs")
+                if section.get("minimum_quality") is not None
+                else None
+            ),
+            high_quality_col=_optional_string(section.get("high_quality_col")),
+            high_quality_value=cast(
+                bool, section.get("high_quality_value", True)
+            ),
             chunk_size=_integer_value(section, "chunk_size", "lincs"),
         )
 
@@ -471,6 +483,30 @@ def rank_drug_candidates(
             resolved_output_dir / "evaluation.csv",
             index=False,
         )
+        split_cols = _evaluation_group_columns(config)
+        train_ids, test_ids = split_signature_contexts(
+            signatures,
+            context_col=split_cols,
+            test_fraction=_float_value(
+                config.pca_ridge, "test_fraction", "pca_ridge"
+            ),
+            random_seed=config.random_seed,
+        )
+        pd.DataFrame(
+            [
+                {"signature_id": identifier, "role": role}
+                for role, identifiers in (
+                    ("train", train_ids),
+                    ("test", test_ids),
+                )
+                for identifier in identifiers
+            ]
+        ).to_csv(resolved_output_dir / "evaluation_split.csv", index=False)
+        if model == "pca-ridge":
+            evaluation.to_csv(
+                resolved_output_dir / "matched_evaluation.csv",
+                index=False,
+            )
     if context_scores is not None:
         context_scores.to_csv(
             resolved_output_dir / "context_scores.csv",
@@ -534,6 +570,7 @@ def _train_mean_outputs(
     evaluation = evaluate_train_mean(
         signatures,
         context_col=context_cols,
+        split_group_cols=_evaluation_group_columns(config),
         drug_col=drug_col,
         test_fraction=_float_value(
             config.pca_ridge,
@@ -631,6 +668,7 @@ def _pca_ridge_outputs(
         signatures,
         drug_col=drug_col,
         context_col=context_cols,
+        split_group_cols=_evaluation_group_columns(config),
         n_components=n_components,
         ridge_alpha=ridge_alpha,
         model_genes=model_genes,
@@ -673,6 +711,19 @@ def _pca_ridge_outputs(
         minimum_shared_genes=minimum_shared_genes,
     )
     return ranked, evaluation, None, predicted, pseudobulk_path
+
+
+def _evaluation_group_columns(config: AnalysisConfig) -> tuple[str, ...]:
+    """Resolve evaluation units independently of vehicle-matching contexts."""
+    if "evaluation_group_cols" in config.pca_ridge:
+        return tuple(
+            _string_sequence(
+                config.pca_ridge,
+                "evaluation_group_cols",
+                "pca_ridge",
+            )
+        )
+    return tuple(_string_sequence(config.tahoe, "context_cols", "tahoe"))
 
 
 def _shared_pca_ridge_genes(
@@ -965,29 +1016,45 @@ def _write_baseline_figures(
         ),
     )
     finite_mask = np.isfinite(numeric_scores.to_numpy(dtype=float))
+    finite_mask &= rankings["score_status"].eq("ok").to_numpy()
     finite = rankings.loc[finite_mask]
+    manifest: dict[str, object] = {}
     if finite.empty:
         logger.warning("No finite baseline scores are available for figures.")
+        (output_dir / "figure_manifest.json").write_text(
+            json.dumps({"status": "no_estimable_scores"}, indent=2) + "\n",
+        )
         return
+    score_names = rankings["score_name"].dropna().unique()
+    if len(score_names) != 1:
+        raise ValueError("Figures require one primary score definition.")
+    score_col = (
+        "score_connectivity"
+        if "connectivity" in str(score_names[0])
+        else "score_mimic"
+    )
     observed_states = set(finite["state"].astype(str))
     state = (
         "AD_ALL" if "AD_ALL" in observed_states else sorted(observed_states)[0]
     )
+    manifest.update(score_name=str(score_names[0]), state=state)
 
     set_matplotlib_publication_parameters()
     state_count = int((finite["state"].astype(str) == state).sum())
     figure, _ = plot_top_rankings(
-        rankings,
+        finite,
         adipocyte_state=state,
         top_n=min(15, state_count),
+        score_col=score_col,
     )
     figure.savefig(output_dir / "top_rankings.pdf", bbox_inches="tight")
     plt.close(figure)
 
     n_drugs = int(finite["drug"].nunique(dropna=True))
     figure, _ = plot_drug_state_scores(
-        rankings,
+        finite,
         top_drugs=min(20, max(1, n_drugs)),
+        score_col=score_col,
     )
     figure.savefig(output_dir / "drug_state_scores.pdf", bbox_inches="tight")
     plt.close(figure)
@@ -996,15 +1063,21 @@ def _write_baseline_figures(
         context_values = cast(
             pd.Series,
             pd.to_numeric(
-                context_scores["score_mimic"],
+                context_scores[score_col],
                 errors="coerce",
             ),
         )
-        if np.isfinite(context_values.to_numpy(dtype=float)).any():
+        eligible_contexts = context_scores.loc[
+            context_scores["score_status"].eq("ok")
+            & np.isfinite(context_values.to_numpy(dtype=float))
+            & context_scores["state"].astype(str).eq(state)
+        ]
+        if not eligible_contexts.empty:
             figure, _ = plot_context_variability(
-                context_scores,
+                eligible_contexts,
                 adipocyte_state=state,
                 random_seed=random_seed,
+                score_col=score_col,
             )
             figure.savefig(
                 output_dir / "context_variability.pdf",
@@ -1019,8 +1092,18 @@ def _write_baseline_figures(
         context_scores=context_scores,
     )
     if candidate is None:
+        manifest["scatter_status"] = "no_unique_candidate_signature"
+        (output_dir / "figure_manifest.json").write_text(
+            json.dumps(manifest, indent=2) + "\n",
+        )
         return
     candidate_label, candidate_delta = candidate
+    manifest["scatter_label"] = candidate_label
+    manifest["scatter_status"] = "ok"
+    manifest["ranking_aggregation"] = str(score_names[0])
+    (output_dir / "figure_manifest.json").write_text(
+        json.dumps(manifest, indent=2) + "\n",
+    )
     figure, _ = plot_signature_scatter(
         candidate_delta,
         rescue_vectors[state],
@@ -1051,6 +1134,7 @@ def _top_candidate_series(
     if pd.isna(top.get("drug")):
         return None
     drug = str(top["drug"])
+    candidate_label = drug
     positions: np.ndarray = np.arange(len(signatures.meta))
 
     if context_scores is not None and "signature_id" in context_scores:
@@ -1068,12 +1152,18 @@ def _top_candidate_series(
             (context_scores["state"].astype(str) == state)
             & (context_scores["drug"].astype(str) == drug)
             & finite_context_scores
+            & context_scores["score_status"].eq("ok")
         ]
         if not scored_contexts.empty:
-            signature_id = str(
-                scored_contexts.sort_values("score", ascending=False).iloc[0][
-                    "signature_id"
-                ]
+            selected = scored_contexts.sort_values(
+                ["score", "signature_id"],
+                ascending=[False, True],
+                kind="stable",
+            ).iloc[0]
+            signature_id = str(selected["signature_id"])
+            candidate_label = (
+                f"{drug}: {signature_id}\n{selected['context']}\n"
+                "highest-scoring measured signature"
             )
             identifiers = (
                 signatures.meta["signature_id"].astype(str).to_numpy()
@@ -1081,6 +1171,10 @@ def _top_candidate_series(
                 else signatures.meta.index.astype(str).to_numpy()
             )
             positions = np.flatnonzero(identifiers == signature_id)
+            if len(positions) != 1:
+                return None
+        else:
+            return None
     if len(positions) != 1:
         drug_column = "drug" if "drug" in signatures.meta else "drug_name"
         if drug_column not in signatures.meta:
@@ -1092,12 +1186,12 @@ def _top_candidate_series(
             )
             mask = mask & state_mask
         positions = np.flatnonzero(mask)
-    if len(positions) == 0:
+    if len(positions) != 1:
         return None
     position = int(positions[0])
     values = np.asarray(signatures.delta[position], dtype=float).reshape(-1)
     genes = pd.Index(signatures.genes, name="gene")
-    return drug, pd.Series(values, index=genes)
+    return candidate_label, pd.Series(values, index=genes)
 
 
 def _cache_matrix_path(prefix: Path) -> Path:

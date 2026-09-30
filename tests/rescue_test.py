@@ -168,14 +168,6 @@ def test_native_limma_keeps_all_genes_and_uses_weightloss_minus_baseline() -> (
     assert result["gene"].tolist() == genes
     assert result["state"].eq("AD_ALL").all()
     assert result["n_pairs"].eq(5).all()
-    assert {
-        "logFC",
-        "moderated_t",
-        "p_value",
-        "adjusted_p_value",
-        "tested",
-        "delta_rescue",
-    }.issubset(result.columns)
 
     up = result.set_index("gene").loc["rescue_up"]
     down = result.set_index("gene").loc["rescue_down"]

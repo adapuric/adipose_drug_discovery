@@ -1,0 +1,5 @@
+source,compound,drug_col,external_drug
+lincs,rosiglitazone,pert_iname,rosiglitazone
+lincs,GW7647,pert_iname,GW-7647
+tahoe,rosiglitazone,drug,Rosiglitazone
+tahoe,GW7647,drug,GW7647

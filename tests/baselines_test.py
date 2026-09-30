@@ -9,44 +9,14 @@ import pytest
 
 from add.baselines import build_adipose_starting_expression
 from add.baselines import evaluate_pca_ridge
-from add.baselines import evaluate_train_mean
 from add.baselines import fit_pca_ridge
 from add.baselines import mean_drug_signatures
 from add.baselines import predict_pca_ridge
 from add.baselines import score_cmap
 from add.baselines import score_mean_drug
-from add.baselines import score_train_mean
 from add.baselines import split_signature_contexts
 from add.baselines import train_mean_signature
 from add.perturb import PerturbSignatures
-
-
-def test_context_split_is_deterministic_and_keeps_contexts_disjoint() -> None:
-    """A fixed seed gives one split with no context on both sides."""
-    signatures = _make_signatures(
-        delta=np.arange(18, dtype=float).reshape(6, 3),
-        contexts=["c1", "c1", "c2", "c2", "c3", "c4"],
-        drugs=["a", "b", "a", "b", "a", "b"],
-    )
-
-    first = split_signature_contexts(
-        signatures,
-        context_col="context_id",
-        test_fraction=0.4,
-        random_seed=17,
-    )
-    second = split_signature_contexts(
-        signatures,
-        context_col="context_id",
-        test_fraction=0.4,
-        random_seed=17,
-    )
-
-    assert first == second
-    context_by_id = signatures.meta["context_id"].to_dict()
-    train_contexts = {context_by_id[identifier] for identifier in first[0]}
-    test_contexts = {context_by_id[identifier] for identifier in first[1]}
-    assert train_contexts.isdisjoint(test_contexts)
 
 
 def test_train_mean_uses_only_training_signatures() -> None:
@@ -67,58 +37,11 @@ def test_train_mean_uses_only_training_signatures() -> None:
         signatures,
         training_signature_ids=["s0", "s1"],
     )
-    generic_scores = score_train_mean(
-        signatures,
-        {"AD_ALL": pd.Series([2.0, 3.0, 4.0], index=signatures.genes)},
-        training_signature_ids=["s0", "s1"],
-        source="fixture",
-    )
-
     np.testing.assert_allclose(mean_delta, [2.0, 3.0, 4.0])
-    assert len(generic_scores) == 1
-    assert pd.isna(generic_scores.loc[0, "drug"])
-    assert generic_scores.loc[0, "signature_id"] == "TRAIN_MEAN"
-    assert generic_scores.loc[0, "baseline"] == "train-mean"
-
-
-def test_train_mean_evaluation_is_deterministic() -> None:
-    """Held-out mean-prediction metrics repeat exactly for a fixed seed."""
-    signatures = _make_signatures(
-        delta=np.array(
-            [
-                [1.0, 2.0, 4.0],
-                [2.0, 3.0, 6.0],
-                [3.0, 5.0, 7.0],
-                [4.0, 7.0, 8.0],
-                [5.0, 8.0, 10.0],
-                [6.0, 9.0, 12.0],
-            ]
-        ),
-        contexts=["c1", "c1", "c2", "c2", "c3", "c3"],
-        drugs=["a", "b", "a", "b", "a", "b"],
-    )
-
-    first = evaluate_train_mean(
-        signatures,
-        context_col="context_id",
-        drug_col="drug",
-        test_fraction=0.34,
-        random_seed=23,
-    )
-    second = evaluate_train_mean(
-        signatures,
-        context_col="context_id",
-        drug_col="drug",
-        test_fraction=0.34,
-        random_seed=23,
-    )
-
-    pd.testing.assert_frame_equal(first, second)
-    assert first["baseline"].eq("train-mean").all()
 
 
 def test_pca_ridge_predictions_use_adipose_starting_expression() -> None:
-    """The same drug has different predictions in two adipose states."""
+    """Known context effects are recovered for the same drug in two states."""
     signatures = _context_dependent_signatures()
     signatures.meta["signature_id"] = signatures.meta.index.astype(str)
     model = fit_pca_ridge(
@@ -143,43 +66,40 @@ def test_pca_ridge_predictions_use_adipose_starting_expression() -> None:
         drug_ids=["drug_a"],
     )
 
-    assert model.genes == ("g1", "g2")
+    assert list(predicted.genes) == ["g1", "g2"]
     assert predicted.meta["state"].tolist() == ["state_a", "state_b"]
-    assert predicted.meta["signature_id"].is_unique
-    assert predicted.meta["signature_id"].tolist() == list(predicted.meta.index)
-    assert not np.allclose(predicted.delta[0], predicted.delta[1])
-    with pytest.raises(ValueError, match="absent from training"):
-        predict_pca_ridge(
-            model,
-            adipose_states,
-            drug_ids=["unknown_drug"],
-        )
+    # The fixture defines delta = 0.5 * control + [1, 0] for drug_a.
+    np.testing.assert_allclose(
+        predicted.delta, [[1.75, 1.75], [2.75, 0.75]], atol=1e-7
+    )
 
 
-def test_pca_ridge_evaluation_repeats_for_a_grouped_split() -> None:
-    """Grouped PCA-ridge evaluation is deterministic for a fixed seed."""
+def test_evaluation_holds_out_entire_cell_lines() -> None:
+    """Plate matching cannot allow the same cell line on both split sides."""
     signatures = _context_dependent_signatures()
-
-    first = evaluate_pca_ridge(
+    signatures.meta["line"] = ["a"] * 4 + ["b"] * 4
+    train, test = split_signature_contexts(
         signatures,
-        drug_col="drug",
-        context_col="context_id",
-        n_components=2,
-        ridge_alpha=0.1,
-        test_fraction=0.25,
-        random_seed=11,
-    )
-    second = evaluate_pca_ridge(
-        signatures,
-        drug_col="drug",
-        context_col="context_id",
-        n_components=2,
-        ridge_alpha=0.1,
-        test_fraction=0.25,
-        random_seed=11,
+        context_col="line",
+        test_fraction=0.5,
+        random_seed=3,
     )
 
-    pd.testing.assert_frame_equal(first, second)
+    evaluation = evaluate_pca_ridge(
+        signatures,
+        context_col="context_id",
+        split_group_cols="line",
+        drug_col="drug",
+        n_components=1,
+        test_fraction=0.5,
+        random_seed=3,
+    )
+
+    assert set(signatures.meta.loc[list(train), "line"]).isdisjoint(
+        signatures.meta.loc[list(test), "line"],
+    )
+    assert set(evaluation["signature_id"]) == set(test)
+    assert evaluation["train_mean_rmse"].notna().all()
 
 
 def test_adipose_starting_expression_weights_donors_equally() -> None:
@@ -316,10 +236,36 @@ def test_cmap_connectivity_is_positive_for_rescue_mimicry() -> None:
     )
     scores = context_scores.set_index("drug")["score"]
 
-    assert scores["mimic"] > 0.0
-    assert scores["inverse"] < 0.0
+    assert scores["mimic"] == pytest.approx(1.0)
+    assert scores["inverse"] == pytest.approx(-1.0)
     assert ranked.loc[0, "drug"] == "mimic"
     assert ranked.loc[0, "rank"] == 1
+
+
+def test_cmap_aggregation_preserves_ineligible_support() -> None:
+    """Unscorable contexts cannot influence medians or become zero scores."""
+    rescue = np.r_[np.arange(10, 0, -1), -np.arange(1, 11)]
+    signatures = _make_signatures(
+        delta=np.vstack([rescue, np.ones(20), np.ones(20)]),
+        contexts=["c1", "c2", "c1"],
+        drugs=["mixed", "mixed", "constant"],
+    )
+
+    ranked, contexts = score_cmap(
+        signatures,
+        {"AD_ALL": pd.Series(rescue, index=signatures.genes)},
+        drug_col="drug",
+        context_col="context_id",
+        minimum_shared_genes=20,
+    )
+
+    ranked = ranked.set_index("drug")
+    assert ranked.loc["mixed", "score"] > 0.9
+    assert ranked.loc["mixed", "n_signatures_eligible"] == 1
+    assert ranked.loc["mixed", "n_signatures_total"] == 2
+    assert pd.isna(ranked.loc["constant", "rank"])
+    assert np.isnan(ranked.loc["constant", "score"])
+    assert contexts["score_status"].eq("constant_candidate").sum() == 2
 
 
 def test_parallel_cmap_matches_serial_output() -> None:
@@ -347,20 +293,6 @@ def test_parallel_cmap_matches_serial_output() -> None:
 
     for serial_table, parallel_table in zip(serial, parallel, strict=True):
         pd.testing.assert_frame_equal(serial_table, parallel_table)
-
-
-def test_baseline_workers_must_be_positive() -> None:
-    """Invalid pool sizes fail before starting worker processes."""
-    signatures, rescues = _parallel_scoring_fixture()
-
-    with pytest.raises(ValueError, match="workers must be at least 1"):
-        score_cmap(
-            signatures,
-            rescues,
-            drug_col="drug",
-            context_col="context_id",
-            workers=0,
-        )
 
 
 def _make_signatures(

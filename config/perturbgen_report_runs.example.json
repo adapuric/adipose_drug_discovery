@@ -1,0 +1,22 @@
+[
+  {
+    "run_id": "replace_with_run_name",
+    "edit_id": "mask_src_ENSG00000131459",
+    "edited_genes": ["ENSG00000131459"],
+    "edit_mode": "mask",
+    "edit_sequence": "src",
+    "result_path": "path/to/native_result.h5ad",
+    "native_revision": null,
+    "checkpoint_id": null,
+    "config_id": null,
+    "training_donors_by_stage": null,
+    "target_information": null,
+    "preprocessing_policy": null,
+    "gene_namespace": "ensembl_gene_id",
+    "transition_predictions_path": null,
+    "prediction_kind": null,
+    "fold_id": null,
+    "profile_identity": null,
+    "population_match_verified": false
+  }
+]

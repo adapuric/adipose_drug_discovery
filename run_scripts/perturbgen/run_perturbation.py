@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import logging
 import pickle
 import re
@@ -108,6 +109,24 @@ def perturbation_gene_directory(
         config.perturbation_output_directory
         / f"{settings.mode}_{settings.sequence}"
         / gene
+    )
+
+
+def apply_perturbation_overrides(
+    config: PerturbGenConfig,
+    *,
+    mode: str | None,
+    sequence: str | None,
+) -> PerturbGenConfig:
+    """Return `config` with command-line edit mode and sequence applied."""
+    settings = config.perturbation
+    return dataclasses.replace(
+        config,
+        perturbation=dataclasses.replace(
+            settings,
+            mode=mode or settings.mode,
+            sequence=sequence or settings.sequence,
+        ),
     )
 
 
@@ -301,6 +320,16 @@ def _parse_arguments() -> argparse.Namespace:
         action="append",
         help="Gene identifier to run separately; repeat for multiple genes.",
     )
+    parser.add_argument(
+        "--mode",
+        choices=sorted(_VALID_MODES),
+        help="Override perturbation.mode from the config.",
+    )
+    parser.add_argument(
+        "--sequence",
+        choices=sorted(_VALID_SEQUENCES),
+        help="Override perturbation.sequence from the config.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -312,7 +341,11 @@ def main() -> None:
         format="%(levelname)s %(name)s: %(message)s",
     )
     arguments = _parse_arguments()
-    config = load_perturbgen_config(arguments.config)
+    config = apply_perturbation_overrides(
+        load_perturbgen_config(arguments.config),
+        mode=arguments.mode,
+        sequence=arguments.sequence,
+    )
     checkpoint = resolve_decoder_checkpoint(
         config,
         override=arguments.checkpoint,

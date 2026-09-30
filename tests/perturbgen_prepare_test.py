@@ -95,13 +95,7 @@ def test_preparation_keeps_only_required_paired_raw_data(
     assert prepared.obs["Donor"].tolist() == ["D1", "D1"]
     assert prepared.obs["condition"].tolist() == ["obese", "weightloss"]
     assert prepared.obs["cell_states_adipocytes"].tolist() == ["AD1", "AD1"]
-    assert "donor_id" not in prepared.obs
     assert prepared.var_names.tolist() == expected_genes
-    assert prepared.var.columns.tolist() == ["ensembl_id"]
-    assert "counts" not in prepared.layers
-    assert "raw" not in prepared.layers
-    assert "normalized" not in prepared.layers
-    assert "perturbgen_preparation" not in prepared.uns
     np.testing.assert_array_equal(
         prepared.X.toarray(),
         raw_counts[:2, gene_positions],

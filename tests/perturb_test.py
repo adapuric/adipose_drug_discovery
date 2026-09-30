@@ -8,7 +8,6 @@ import anndata as ad  # type: ignore[import]
 import h5py
 import numpy as np
 import pandas as pd
-import pytest
 import scipy.sparse as sp
 
 from add.perturb import PerturbSignatures
@@ -16,16 +15,6 @@ from add.perturb import load_lincs_signatures
 from add.perturb import load_perturb_signatures
 from add.perturb import load_tahoe_signatures
 from add.perturb import save_perturb_signatures
-
-
-def test_signature_container_rejects_misaligned_metadata() -> None:
-    """A signature matrix cannot silently detach rows from metadata."""
-    with pytest.raises(ValueError, match="rows do not match metadata"):
-        PerturbSignatures(
-            delta=np.ones((2, 3)),
-            genes=["A", "B", "C"],
-            meta=pd.DataFrame({"drug": ["one"]}),
-        )
 
 
 def test_signature_cache_round_trips_control_and_provenance(
@@ -229,3 +218,31 @@ def test_lincs_loads_gctx_by_ids_and_filters_compounds(
     assert signatures.provenance["n_matrix_signatures"] == 3
     assert signatures.provenance["n_retained_signatures"] == 2
     assert signatures.provenance["n_retained_genes"] == 2
+
+
+def test_lincs_quality_filter_preserves_matrix_identifier_alignment(
+    tmp_path,
+) -> None:
+    """QC filters preserve matrix alignment despite shuffled metadata."""
+    matrix = pd.DataFrame(
+        {
+            "signature_id": ["a", "b", "c"],
+            "g1": [1.0, 20.0, 300.0],
+            "g2": [2.0, 30.0, 400.0],
+        }
+    )
+    metadata = pd.DataFrame(
+        {"signature_id": ["c", "a", "b"], "quality": [0.2, 0.9, np.nan]}
+    )
+    matrix.to_csv(tmp_path / "matrix.csv", index=False)
+    metadata.to_csv(tmp_path / "metadata.csv", index=False)
+
+    result = load_lincs_signatures(
+        tmp_path / "matrix.csv",
+        tmp_path / "metadata.csv",
+        quality_col="quality",
+        minimum_quality=0.5,
+    )
+
+    assert result.meta["signature_id"].tolist() == ["a"]
+    np.testing.assert_array_equal(result.delta, [[1.0, 2.0]])

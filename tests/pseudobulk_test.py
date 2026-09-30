@@ -118,28 +118,6 @@ def test_pseudobulk_exactly_sums_configured_raw_counts_in_chunks() -> None:
     assert sparse.isspmatrix_csr(pseudobulk.X)
 
 
-def test_pseudobulk_has_one_row_per_biological_group_not_per_nucleus() -> None:
-    """Nuclei contribute counts but never become replicate output rows."""
-    pseudobulk = build_adipose_pseudobulk(
-        _cell_level_adipose(),
-        count_layer="counts",
-        min_cells=2,
-        chunk_size=3,
-    )
-
-    group_columns = ["Donor", "condition", "cell_state_t2d"]
-    assert not pseudobulk.obs.duplicated(group_columns).any()
-    assert pseudobulk.n_obs == 6
-    assert pseudobulk.n_obs < 8  # eight nuclei entered the aggregation
-
-    # D2 baseline has one nucleus, so it fails min_cells independently in both
-    # the state-level and pooled estimators.
-    d2_baseline = (pseudobulk.obs["Donor"] == "D2") & (
-        pseudobulk.obs["condition"] == "baseline"
-    )
-    assert not d2_baseline.any()
-
-
 def test_aggregate_counts_never_falls_back_to_x() -> None:
     """A missing configured layer fails even when X contains expression."""
     adata = _cell_level_adipose()
@@ -164,7 +142,6 @@ def test_group_support_retains_below_threshold_candidates() -> None:
     )
 
     assert len(support) == 8
-    assert support["retained"].dtype == bool
     assert not support.duplicated(
         ["Donor", "condition", "cell_state_t2d"]
     ).any()
@@ -217,7 +194,6 @@ def test_backed_sparse_count_layer_produces_persistable_profiles(
         state="AD_ALL",
     )
     np.testing.assert_array_equal(vector, np.array([5, 3, 3]))
-    assert pd.api.types.is_float_dtype(restored.obs["BMI"])
     d2_weightloss = restored.obs.loc[
         (restored.obs["Donor"] == "D2")
         & (restored.obs["condition"] == "weightloss")

@@ -1,0 +1,26 @@
+schema_version: 1
+pseudobulk_path: results/pseudobulk/adipose_pseudobulk.h5ad
+output_path: results/adipose_benchmark
+parameters:
+  donor_col: Donor
+  condition_col: condition
+  state_col: cell_state_t2d
+  support_col: n_cells
+  baseline_label: baseline
+  weightloss_label: weightloss
+  count_layer: null
+  gene_namespace: gene_symbol
+  preprocessing_policy: full_raw_gene_universe
+  min_cells: 20
+  normalization_target: 1000000.0
+  minimum_gene_cpm: 1.0
+  minimum_gene_donors: 2
+  minimum_shared_genes: 50
+  mean_shift_minimum_donors: 2
+  ridge_minimum_donors: 3
+  ridge_maximum_genes: 2000
+  ridge_components: 5
+  ridge_alpha: 10.0
+  random_seed: 42
+  bootstrap_draws: 2000
+  confidence_level: 0.95

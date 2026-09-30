@@ -30,7 +30,7 @@ tahoe:
     - cell_line
     - plate
   sample_col: sample
-  dose_col: null
+  dose_col: drugname_drugconc
   time_col: null
   target_col: null
   mechanism_col: null
@@ -49,6 +49,9 @@ lincs:
   target_col: null
   mechanism_col: null
   quality_col: null
+  minimum_quality: null
+  high_quality_col: null
+  high_quality_value: true
   gene_id_col: pr_gene_id
   gene_col: pr_gene_symbol
   landmark_col: pr_is_lm
@@ -63,6 +66,8 @@ gene_selection:
   cmap_minimum_query_genes: 10
 
 pca_ridge:
+  evaluation_group_cols:
+    - cell_line
   n_components: 30
   ridge_alpha: 10.0
   test_fraction: 0.2

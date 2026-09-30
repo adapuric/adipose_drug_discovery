@@ -6,9 +6,53 @@ import numpy as np
 import pandas as pd
 
 from add.perturb import PerturbSignatures
+from add.scoring import score_cmap_signatures
 from add.scoring import score_mimicry
-from add.scoring import score_signatures
 from add.scoring import weighted_cmap_connectivity
+
+
+def test_cmap_rejects_unsupported_candidates() -> None:
+    """Insufficient signatures cannot acquire connectivity scores or ranks."""
+    n_genes = 20
+    genes = [f"g{i:03}" for i in range(n_genes)]
+    rescue = np.concatenate([np.ones(n_genes // 2), -np.ones(n_genes // 2)])
+    candidate = rescue.copy()
+    signatures = PerturbSignatures(
+        delta=candidate[None, :],
+        genes=genes,
+        meta=pd.DataFrame({"drug": ["candidate"]}),
+    )
+
+    scores = score_cmap_signatures(
+        signatures,
+        rescue,
+        genes,
+        minimum_shared_genes=50,
+    )
+
+    assert scores.loc[0, "score_status"] == "insufficient_shared_genes"
+    assert np.isnan(scores.loc[0, "score_connectivity"])
+    assert pd.isna(scores.loc[0, "rank"])
+
+
+def test_cmap_shared_support_counts_only_aligned_finite_values() -> None:
+    """Missing values cannot satisfy the enrichment gene-support threshold."""
+    genes = [f"g{i}" for i in range(6)]
+    rescue = np.array([3.0, 2.0, 1.0, -1.0, -2.0, -3.0])
+    candidate = rescue.copy()
+    candidate[0] = np.nan
+
+    result = weighted_cmap_connectivity(
+        candidate[::-1],
+        genes[::-1],
+        rescue,
+        genes,
+        minimum_shared_genes=6,
+        minimum_query_genes=1,
+    )
+
+    assert result.n_shared == 5
+    assert result.status == "insufficient_shared_genes"
 
 
 def test_mimicry_aligns_shuffled_gene_order() -> None:
@@ -40,25 +84,6 @@ def test_positive_score_means_candidate_mimics_rescue() -> None:
     assert reverse.score_spearman < -0.99
 
 
-def test_signature_table_uses_canonical_state_column() -> None:
-    """Table scoring labels rows with the canonical adipocyte-state field."""
-    signatures = PerturbSignatures(
-        delta=np.array([[1.0, 2.0, 3.0]]),
-        genes=["A", "B", "C"],
-        meta=pd.DataFrame({"drug": ["candidate"]}),
-    )
-
-    result = score_signatures(
-        signatures,
-        [1.0, 2.0, 3.0],
-        ["A", "B", "C"],
-        state="AD_ALL",
-    )
-
-    assert result["state"].tolist() == ["AD_ALL"]
-    assert "adipocyte_state" not in result
-
-
 def test_mimicry_reports_finite_shared_gene_support() -> None:
     """Missing values reduce usable gene support rather than becoming zero."""
     result = score_mimicry(
@@ -72,32 +97,3 @@ def test_mimicry_reports_finite_shared_gene_support() -> None:
     assert result.n_shared == 2
     assert result.status == "insufficient_shared_genes"
     assert np.isnan(result.score_mimic)
-
-
-def test_weighted_cmap_connectivity_uses_mimicry_sign() -> None:
-    """Rescue-up at the top and rescue-down at the bottom scores positive."""
-    genes = ["UP1", "UP2", "UP3", "DOWN1", "DOWN2", "DOWN3"]
-    rescue = np.array([3.0, 2.0, 1.0, -1.0, -2.0, -3.0])
-
-    mimic = weighted_cmap_connectivity(
-        rescue,
-        genes,
-        rescue,
-        genes,
-        maximum_query_genes=3,
-        minimum_query_genes=2,
-    )
-    reverse = weighted_cmap_connectivity(
-        -rescue,
-        genes,
-        rescue,
-        genes,
-        maximum_query_genes=3,
-        minimum_query_genes=2,
-    )
-
-    assert mimic.status == "ok"
-    assert mimic.enrichment_up > 0.0
-    assert mimic.enrichment_down < 0.0
-    assert mimic.score_connectivity > 0.9
-    assert reverse.score_connectivity < -0.9

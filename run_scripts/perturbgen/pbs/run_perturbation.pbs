@@ -21,6 +21,13 @@
 #   qsub \
 #     -v DECODER_CHECKPOINT=/path/to/decoder.ckpt,PERTURBATION_GENES=ENSG...:ENSG... \
 #     run_scripts/perturbgen/pbs/run_perturbation.pbs
+#
+# CLI Override. PERTURBATION_MODE ("delete", "mask", "overexpress", or "pad")
+# and/or PERTURBATION_SEQUENCE ("src" or "tgt"). Each mode/sequence pair writes
+# to its own perturbation/<mode>_<sequence>/ directory:
+#   qsub \
+#     -v DECODER_CHECKPOINT=/path/to/decoder.ckpt,PERTURBATION_GENES=ENSG...:ENSG...,PERTURBATION_MODE=delete,PERTURBATION_SEQUENCE=tgt \
+#     run_scripts/perturbgen/pbs/run_perturbation.pbs
 
 set -o errexit
 set -o nounset
@@ -42,6 +49,8 @@ OPENMPI_MODULE="${OPENMPI_MODULE:-OpenMPI/4.1.6-GCC-13.2.0}"
 DECODER_CHECKPOINT="${DECODER_CHECKPOINT:-}"
 PERTURBATION_GENE="${PERTURBATION_GENE:-}"
 PERTURBATION_GENES="${PERTURBATION_GENES:-}"
+PERTURBATION_MODE="${PERTURBATION_MODE:-}"
+PERTURBATION_SEQUENCE="${PERTURBATION_SEQUENCE:-}"
 
 # PBS logging
 PBS_COMMON="/gpfs/home/sho3/pbs_common.sh"
@@ -144,6 +153,12 @@ main() {
   for gene in "${perturbation_genes[@]}"; do
     command+=(--gene "${gene}")
   done
+  if [[ -n "${PERTURBATION_MODE}" ]]; then
+    command+=(--mode "${PERTURBATION_MODE}")
+  fi
+  if [[ -n "${PERTURBATION_SEQUENCE}" ]]; then
+    command+=(--sequence "${PERTURBATION_SEQUENCE}")
+  fi
 
   mkdir -p "${LOG_DIR}"
   source "${PBS_COMMON}"
@@ -164,6 +179,9 @@ main() {
   else
     printf 'Perturbation genes: from config\n'
   fi
+  printf 'Perturbation mode: %s\n' "${PERTURBATION_MODE:-from config}"
+  printf 'Perturbation sequence: %s\n' \
+    "${PERTURBATION_SEQUENCE:-from config}"
   printf 'W&B mode: %s\n' "${WANDB_MODE}"
   run_stage "run and summarize PerturbGen inference" "${command[@]}"
   printf '\nJob finished: %s\n' "$(date -Is)"

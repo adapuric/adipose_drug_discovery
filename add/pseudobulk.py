@@ -453,7 +453,8 @@ def _persistable_metadata(
     if pd.api.types.is_numeric_dtype(source.dtype):
         return pd.Series(
             [
-                np.nan if cast(bool, pd.isna(value)) else value
+                # Numeric metadata values are scalar despite the broad type.
+                np.nan if pd.isna(value) else value  # type: ignore[reportArgumentType]
                 for value in values
             ],
             dtype=np.float64,

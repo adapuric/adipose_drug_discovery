@@ -326,6 +326,16 @@ def load_tahoe_signatures(
                 )
 
             optional_groups = [sample_col, dose_col, time_col]
+            missing_groups = [
+                name
+                for name in optional_groups
+                if name is not None and name not in obs
+            ]
+            if missing_groups:
+                raise KeyError(
+                    "Tahoe configured treatment columns absent: "
+                    f"{missing_groups}"
+                )
             shard_group_cols = list(
                 dict.fromkeys(
                     [
@@ -513,6 +523,10 @@ def load_lincs_signatures(
     perturbation_type_col: str | None = None,
     compound_type: str | None = None,
     chunk_size: int = 4_096,
+    quality_col: str | None = None,
+    minimum_quality: float | None = None,
+    high_quality_col: str | None = None,
+    high_quality_value: bool = True,
 ) -> PerturbSignatures:
     """Load measured LINCS signatures using explicit signature and gene IDs.
 
@@ -533,6 +547,10 @@ def load_lincs_signatures(
       perturbation_type_col: Optional metadata column used to retain compounds.
       compound_type: Exact compound label retained from the type column.
       chunk_size: GCTX signature rows read per bounded chunk.
+      quality_col: Optional numeric quality field; requires a threshold.
+      minimum_quality: Inclusive minimum for the numeric quality field.
+      high_quality_col: Optional boolean-like quality annotation.
+      high_quality_value: Required nonmissing value of that annotation.
 
     Returns:
       Aligned measured LINCS signatures and metadata.
@@ -552,12 +570,22 @@ def load_lincs_signatures(
         signature_id_col=signature_id_col,
         table_name="metadata",
     )
+    quality_mask, quality_diagnostics = _lincs_quality_filter(
+        metadata,
+        quality_col=quality_col,
+        minimum_quality=minimum_quality,
+        high_quality_col=high_quality_col,
+        high_quality_value=high_quality_value,
+    )
+    quality_by_id = pd.Series(quality_mask, index=metadata_ids.astype(str))
     if matrix_file.name.casefold().endswith(".gctx"):
         return _load_lincs_gctx(
             matrix_file,
             metadata_file=metadata_file,
             metadata=metadata,
             metadata_ids=metadata_ids,
+            quality_by_id=quality_by_id,
+            quality_diagnostics=quality_diagnostics,
             signature_id_col=signature_id_col,
             gene_metadata_path=gene_metadata_path,
             gene_col=gene_col,
@@ -585,6 +613,14 @@ def load_lincs_signatures(
         perturbation_type_col=perturbation_type_col,
         compound_type=compound_type,
     )
+    retained_positions = np.asarray(retained_positions, dtype=int)[
+        np.asarray(
+            quality_by_id.loc[
+                aligned_metadata.index.take(retained_positions)
+            ].to_numpy(dtype=bool),
+            dtype=bool,
+        )
+    ]
     aligned_metadata = aligned_metadata.iloc[retained_positions].copy()
 
     genes = [column for column in matrix.columns if column != signature_id_col]
@@ -632,6 +668,7 @@ def load_lincs_signatures(
 
     provenance: dict[str, object] = {
         "source": "lincs",
+        "quality_filter": quality_diagnostics,
         "matrix_file": _file_identity(matrix_file),
         "metadata_file": _file_identity(metadata_file),
         "signature_id_column": signature_id_col,
@@ -661,12 +698,65 @@ def load_lincs_signatures(
     )
 
 
+def _lincs_quality_filter(
+    metadata: pd.DataFrame,
+    *,
+    quality_col: str | None,
+    minimum_quality: float | None,
+    high_quality_col: str | None,
+    high_quality_value: bool,
+) -> tuple[np.ndarray, dict[str, object]]:
+    """Resolve explicit quality predicates without manufacturing missing QC."""
+    if (quality_col is None) != (minimum_quality is None):
+        raise ValueError(
+            "quality_col and minimum_quality must be supplied together"
+        )
+    retained = np.ones(len(metadata), dtype=bool)
+    exclusions: dict[str, int] = {}
+    if quality_col is not None:
+        if quality_col not in metadata:
+            raise KeyError(f"LINCS quality column absent: {quality_col}")
+        if minimum_quality is None or not np.isfinite(minimum_quality):
+            raise ValueError("minimum_quality must be finite")
+        numeric = pd.to_numeric(metadata[quality_col], errors="raise")
+        passed = np.asarray(
+            np.isfinite(numeric) & numeric.ge(minimum_quality), dtype=bool
+        )
+        retained &= passed
+        exclusions["numeric_quality_failed_or_missing"] = int((~passed).sum())
+    if high_quality_col is not None:
+        if high_quality_col not in metadata:
+            raise KeyError(f"LINCS quality column absent: {high_quality_col}")
+        if not isinstance(high_quality_value, bool):
+            raise TypeError("high_quality_value must be boolean")
+        values = metadata[high_quality_col]
+        passed = (
+            values.notna() & _boolean_mask(values).eq(high_quality_value)
+        ).to_numpy(dtype=bool)
+        retained &= passed
+        exclusions["boolean_quality_failed_or_missing"] = int((~passed).sum())
+    return retained, {
+        "policy": "explicit"
+        if quality_col or high_quality_col
+        else "not_configured",
+        "quality_col": quality_col,
+        "minimum_quality": minimum_quality,
+        "high_quality_col": high_quality_col,
+        "high_quality_value": high_quality_value,
+        "n_metadata_before": len(metadata),
+        "n_metadata_after": int(retained.sum()),
+        "exclusion_counts": exclusions,
+    }
+
+
 def _load_lincs_gctx(
     matrix_file: Path,
     *,
     metadata_file: Path,
     metadata: pd.DataFrame,
     metadata_ids: pd.Series,
+    quality_by_id: pd.Series,
+    quality_diagnostics: dict[str, object],
     signature_id_col: str,
     gene_metadata_path: str | Path | None,
     gene_col: str,
@@ -724,6 +814,11 @@ def _load_lincs_gctx(
             perturbation_type_col=perturbation_type_col,
             compound_type=compound_type,
         )
+        signature_positions = signature_positions[
+            quality_by_id.loc[
+                aligned_metadata.index.take(signature_positions)
+            ].to_numpy(dtype=bool)
+        ]
         aligned_metadata = aligned_metadata.iloc[signature_positions].copy()
         genes, gene_positions, gene_metadata_file = _gctx_landmark_genes(
             matrix_gene_ids,
@@ -742,6 +837,7 @@ def _load_lincs_gctx(
 
     provenance: dict[str, object] = {
         "source": "lincs",
+        "quality_filter": quality_diagnostics,
         "matrix_file": _file_identity(matrix_file),
         "metadata_file": _file_identity(metadata_file),
         "signature_id_column": signature_id_col,
@@ -1056,7 +1152,7 @@ def _gene_reorder(
     if observed == expected:
         return None
     observed_index = pd.Index(observed)
-    indexer = observed_index.get_indexer(expected)
+    indexer = observed_index.get_indexer(pd.Index(expected))
     if len(observed) != len(expected) or bool((indexer < 0).any()):
         raise ValueError(
             f"Tahoe shard gene space differs from earlier shards: {source}"
@@ -1182,7 +1278,8 @@ def _accumulate_count_groups(
 
 def _canonical_group_value(value: object) -> object:
     """Return a stable hashable scalar for a grouping-key tuple."""
-    missing: Any = pd.isna(value)
+    # Group values are scalars; pandas' overload omits an object scalar.
+    missing = pd.isna(value)  # type: ignore[reportArgumentType]
     if bool(missing):
         return None
     if isinstance(value, np.generic):

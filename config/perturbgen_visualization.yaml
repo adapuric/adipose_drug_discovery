@@ -1,0 +1,17 @@
+schema_version: 1
+run_manifest: config/perturbgen_report_runs.example.json
+output_path: results/perturbgen_report
+donor_col: Donor
+state_col: cell_states_adipocytes
+readout_genes: []
+states: []
+top_n: 20
+random_seed: 42
+bootstrap_draws: 2000
+confidence_level: 0.95
+benchmark_path: null
+gene_mapping_path: null
+png: true
+figsize: null
+point_size: 18.0
+color_limit: null

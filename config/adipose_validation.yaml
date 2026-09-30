@@ -1,0 +1,28 @@
+schema_version: 1
+sample_manifest: config/adipose_validation_samples.csv
+compound_mapping: config/adipose_validation_compounds.csv
+output_path: results/adipose_validation
+minimum_shared_genes: 50
+external: {}
+rescue_path: null
+studies:
+  - study_id: GSE122721
+    matrix_path: data/adipose_validation/GSE122721/series_matrix.txt.gz
+    platform_path: data/adipose_validation/GSE122721/platform.soft.gz
+    probe_col: ID
+    gene_col: SPOT_ID
+    input_scale: unresolved
+    pairing: paired
+    source_url: https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE122721
+    processing_evidence: GSM3484050 VALUE annotation claims log2 RMA; matrix range is 4.8 to 6926.98. Platform identifies Entrez IDs rather than gene symbols.
+    blocked_reason: Resolve deposited expression scale and contradictory BRL-37344 sample descriptions versus rosiglitazone treatment labels, then provide an explicit Entrez-to-gene-symbol mapping before comparison.
+  - study_id: GSE71293
+    matrix_path: data/adipose_validation/GSE71293/series_matrix.txt.gz
+    platform_path: data/adipose_validation/GSE71293/platform.soft.gz
+    probe_col: ID
+    gene_col: GENE_SYMBOL
+    input_scale: log2_reference_ratio
+    pairing: unpaired
+    source_url: https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE71293
+    processing_evidence: GSM1831867 VALUE is log2 normalized sample/reference ratio; Lowess and quantile normalization. Four experiments per condition; replicate-number pairing is not assumed.
+    blocked_reason: null

@@ -188,6 +188,7 @@ def weighted_cmap_connectivity(
     *,
     maximum_query_genes: int = 150,
     minimum_query_genes: int = 10,
+    minimum_shared_genes: int = 3,
 ) -> CMapScore:
     """Calculate weighted CMap-style bidirectional rank connectivity.
 
@@ -203,10 +204,13 @@ def weighted_cmap_connectivity(
       rescue_genes: Gene identifiers aligned to rescue values.
       maximum_query_genes: Maximum strongest genes retained per rescue arm.
       minimum_query_genes: Minimum genes required in each signed query arm.
+      minimum_shared_genes: Minimum finite aligned genes before enrichment.
 
     Returns:
       Weighted connectivity and query-support diagnostics.
     """
+    if minimum_shared_genes < 2:
+        raise ValueError("minimum_shared_genes must be at least 2")
     if maximum_query_genes < 1:
         raise ValueError("maximum_query_genes must be at least 1")
     if minimum_query_genes < 1:
@@ -235,6 +239,20 @@ def weighted_cmap_connectivity(
         positive=False,
         maximum=maximum_query_genes,
     )
+    if n_shared < minimum_shared_genes or _is_constant(candidate):
+        return CMapScore(
+            score_connectivity=np.nan,
+            n_shared=n_shared,
+            n_up=int(up_indices.size),
+            n_down=int(down_indices.size),
+            enrichment_up=np.nan,
+            enrichment_down=np.nan,
+            status=(
+                "insufficient_shared_genes"
+                if n_shared < minimum_shared_genes
+                else "constant_candidate"
+            ),
+        )
     if (
         up_indices.size < minimum_query_genes
         or down_indices.size < minimum_query_genes
@@ -286,6 +304,7 @@ def score_cmap_signatures(
     state: str | None = None,
     maximum_query_genes: int = 150,
     minimum_query_genes: int = 10,
+    minimum_shared_genes: int = 3,
 ) -> pd.DataFrame:
     """Score each measured signature with weighted rank connectivity.
 
@@ -296,6 +315,7 @@ def score_cmap_signatures(
       state: Optional adipocyte-state label added to every output row.
       maximum_query_genes: Maximum strongest genes per rescue arm.
       minimum_query_genes: Minimum genes required per rescue arm.
+      minimum_shared_genes: Minimum finite aligned genes before enrichment.
 
     Returns:
       Metadata plus connectivity, arm support, diagnostics, and rank.
@@ -325,6 +345,7 @@ def score_cmap_signatures(
             rescue_genes,
             maximum_query_genes=maximum_query_genes,
             minimum_query_genes=minimum_query_genes,
+            minimum_shared_genes=minimum_shared_genes,
         )
         for signature in signatures.delta
     ]
