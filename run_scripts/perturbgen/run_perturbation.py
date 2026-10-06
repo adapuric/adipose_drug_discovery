@@ -359,6 +359,12 @@ def main() -> None:
         override=arguments.checkpoint,
     )
     genes = resolve_genes(config, overrides=arguments.gene)
+    prepare = config.prepare
+    if prepare is None:
+        raise ValueError(
+            "Perturbation summaries group by prepare.donor_col and "
+            "prepare.state_alias_col; this config has no prepare section."
+        )
     if not arguments.dry_run:
         validate_runtime_inputs(
             config,
@@ -395,8 +401,8 @@ def main() -> None:
         summary_paths = summarize_perturbation_result(
             result_path,
             output_directory=output_directory / "summary",
-            donor_col=config.prepare.donor_col,
-            state_col=config.prepare.state_alias_col,
+            donor_col=prepare.donor_col,
+            state_col=prepare.state_alias_col,
         )
         for name, path in summary_paths.items():
             logger.info("%s: %s", name, path)

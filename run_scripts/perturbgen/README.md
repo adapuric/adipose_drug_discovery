@@ -36,67 +36,6 @@ python -m run_scripts.perturbgen.run_perturbation \
 Every model-launching script supports `--dry-run` which prints the resolved
 command without executing it.
 
-## Donor-aware result reports
-
-The reporting script consumes existing native result H5ADs or historical
-`summary/donor_state_effects.csv.gz` files. It does not launch the native model:
-
-```bash
-python -m run_scripts.perturbgen.plot_perturbation \
-  --config config/perturbgen_visualization.yaml --dry-run
-python -m run_scripts.perturbgen.plot_perturbation \
-  --config config/perturbgen_visualization.yaml \
-  --output-dir results/perturbgen_report_run1
-```
-
-Copy `config/perturbgen_report_runs.example.json` and configure explicit run/edit
-IDs, edited genes in the native gene namespace, and a `result_path` (or
-`summary_path`). Set the YAML `run_manifest` to that file. Unknown training
-provenance remains unknown. Multiple edits from one run get a common report,
-while different runs and expression scales remain separate. An optional
-`gene_mapping_path` is a CSV with unique `gene_id` and `symbol` columns.
-
-Native `X` is the edited count prediction and `layers["pred_counts"]` is the
-unedited prediction. The adapter sums counts within donor/state, uses the
-unedited library size for both profiles, and excludes edited coordinates from
-downstream metrics. This prevents compositional renormalization from inventing
-a downstream effect when only the edited gene changes. The no-downstream-effect
-reference holds the unedited prediction fixed and has exactly zero downstream
-change. Missing values remain missing.
-
-Reports include an edit/readout heatmap, donor effects with conditional
-donor-bootstrap intervals where supported, downstream magnitude versus zero,
-and coverage QC. Each figure has a companion data table and manifest entry.
-Readout lists are prespecified when configured; otherwise the top-20 selection
-is labeled exploratory. Historical summary plots retain their original
-log2-ratio-of-nucleus-means scale. Sampling draws are not independent donors.
-
-`benchmark_path` optionally points to the independent surgery-transition report
-produced by `run_scripts.baselines.evaluate_adipose_transition`. It adds donor
-prediction-error comparisons and a change scatter. A native transition export
-can join only when its manifest documents disjoint donor exposure at masking,
-decoder, checkpoint selection, and preprocessing stages, plus absence of target
-expression, token/order, and size-factor information. Specify these using
-`training_donors_by_stage` and `target_information`; see the adapter's schema.
-Each checkpoint/export declares `prediction_kind: unedited_transition`, exactly
-one `fold_id`, `profile_identity`
-(the reference pseudobulk SHA256), and `population_match_verified: true`.
-`transition_predictions_path` must contain unique fold/donor/state/gene rows,
-baseline/observed expression, predicted change, and scale matching the reference
-benchmark. Gene support and observed values are checked before admission.
-Paired improvements and their descriptive donor-bootstrap intervals use common
-donor support and appear in `paired_model_comparisons.csv` and
-`paired_comparison_summary.csv`.
-
-The current training wrappers request `split=False`; inspected native inference
-also receives target information. These outputs support descriptive sensitivity
-checks, not a held-out target-blind leaderboard. Merely setting a split flag
-does not establish donor isolation or remove target information.
-`true_counts` represents ordinary observed target samples, not experimental
-gene-edit outcomes. Deviation from the zero-effect reference is not evidence
-that an edit is biologically correct. Experimental edited/control data would
-be needed for that claim.
-
 Masking and decoder training save one loss-labelled checkpoint per epoch. When
 training finishes, each wrapper prints the five newly created checkpoints with
 the lowest loss values so that a checkpoint can be selected for the next
@@ -106,7 +45,7 @@ stage.
 
 ```text
 pg_results/<run_name>/
-├── prepared_adipocytes.h5ad
+├── prepared_adipocytes.h5ad    # prepare stage only
 ├── masking/
 ├── decoder/
 ├── embeddings/
@@ -127,6 +66,49 @@ switching between full-gene and highly-variable-gene inputs.
 
 Checkpoint paths can be written into `config.yaml` or passed with
 `--checkpoint`; the command-line value takes precedence.
+
+## Other datasets
+
+To run a non-adipose H5AD, omit the `prepare` section, set
+`tokenize.input_h5ad_path`, and leave `prepare` out of `STAGES`. The H5AD needs
+raw counts in `X`, Ensembl IDs in `var["ensembl_id"]`, and the obs columns your
+config names.
+
+```yaml
+run:
+  run_name: lps_tutorial
+  results_root_directory: /path/to/pg_results
+
+# No prepare section.
+
+tokenize:
+  input_h5ad_path: /path/to/full_lps.h5ad
+  gene_filtering_mode: hvg
+  highly_variable_gene_count: 2000
+  time_obs_col: time_after_LPS
+  main_pairing_obs: cell_type_harmonized
+  reference_time: normal
+  time_point_order: [normal, 90m_LPS, 6h_LPS, 10h_LPS]
+  # Remaining tokenize keys as in config.yaml.
+```
+
+```bash
+qsub -v CONFIG_PATH=/path/to/config.yaml,STAGES=tokenize:masking \
+  run_scripts/perturbgen/pbs/prepare_tokenize_train_masking_model.pbs
+```
+
+Full example: `configs/config_LPS_reproducing_hvg.yaml`.
+
+Notes:
+
+- `highly_variable_gene_count` sets `--n_hvg` (default 2000). In "hvg" mode
+  PerturbGen writes `dataset_2000_hvg_*` instead of `dataset_all_*`, and the
+  wrappers follow it.
+- Set `masking.sampling_keys` if `masking.use_weighted_sampler` is true.
+- `conditioning_obs_cols: []` trains without condition tokens.
+- `run_perturbation` still needs a `prepare` section for its donor/state
+  summaries.
+
 
 <br>
 
@@ -171,6 +153,12 @@ CONFIG_PATH="${REPO_DIR}/run_scripts/perturbgen/configs/config.yaml"
 
 # Submit prepare + masking model job
 qsub -v CONFIG_PATH="${CONFIG_PATH}" \
+  "${REPO_DIR}/run_scripts/perturbgen/pbs/prepare_tokenize_train_masking_model.pbs"
+
+# Run selected stages, in workflow order, with a colon-separated STAGES value.
+# Command-line -l options override the job's resource directives.
+qsub -l walltime=72:00:00 \
+  -v CONFIG_PATH="${CONFIG_PATH}",STAGES=tokenize:masking \
   "${REPO_DIR}/run_scripts/perturbgen/pbs/prepare_tokenize_train_masking_model.pbs"
 
 # Select lowest-loss masking checkpoint.

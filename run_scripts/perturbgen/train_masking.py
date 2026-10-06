@@ -23,6 +23,11 @@ def build_masking_command(
     """Build the PerturbGen masking-model training command."""
     model = config.model
     masking = config.masking
+    if masking.use_weighted_sampler and not masking.sampling_keys:
+        raise ValueError(
+            "masking.use_weighted_sampler requires masking.sampling_keys."
+        )
+
     command = [
         python_executable or sys.executable,
         "-m",
@@ -34,8 +39,6 @@ def build_masking_command(
         "False",
         "--splitting_mode",
         "stratified",
-        "--split_obs",
-        *model.conditioning_obs_cols,
         "--output_dir",
         str(config.masking_output_directory),
         *model_data_arguments(config),
@@ -59,6 +62,8 @@ def build_masking_command(
         "--ckpt_every_n_epochs",
         str(masking.checkpoint_interval_epochs),
     ]
+    if masking.sampling_keys:
+        command.extend(["--sampling_keys", *masking.sampling_keys])
     resume_checkpoint = masking.resume_checkpoint_path
     if resume_checkpoint is not None:
         command.extend(["--ckpt_masking_path", str(resume_checkpoint)])

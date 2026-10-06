@@ -40,8 +40,6 @@ def build_decoder_command(
         "False",
         "--splitting_mode",
         "stratified",
-        "--split_obs",
-        *model.conditioning_obs_cols,
         "--output_dir",
         str(config.decoder_output_directory),
         "--ckpt_masking_path",

@@ -1,4 +1,4 @@
-"""Tokenize and donor-pair the prepared adipocyte data with PerturbGen."""
+"""Tokenize and pair the configured H5AD with PerturbGen."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ def build_tokenize_command(
     *,
     python_executable: str | None = None,
 ) -> list[str]:
-    """Build the donor-paired PerturbGen tokenization command."""
+    """Build the paired PerturbGen tokenization command."""
     tokenize = config.tokenize
     command = [
         python_executable or sys.executable,
@@ -26,13 +26,15 @@ def build_tokenize_command(
         "perturbgen",
         "tokenise",
         "--h5ad_path",
-        str(config.output_h5ad_path),
+        str(config.tokenizer_input_h5ad_path),
         "--dataset",
         config.run.run_name,
         "--gene_filtering_mode",
         tokenize.gene_filtering_mode,
         "--hvg_mode",
         tokenize.hvg_mode,
+        "--n_hvg",
+        str(tokenize.highly_variable_gene_count),
         "--var_list",
         *tokenize.retained_obs_cols,
         "--pairing_mode",
@@ -79,6 +81,13 @@ def main() -> None:
     )
     arguments = _parse_arguments()
     config = load_perturbgen_config(arguments.config)
+    input_path = config.tokenizer_input_h5ad_path
+    if not arguments.dry_run and not input_path.is_file():
+        raise FileNotFoundError(
+            f"Tokenizer input H5AD not found: {input_path}. Run the prepare "
+            "stage first or set tokenize.input_h5ad_path to an existing file."
+        )
+
     run_command(
         build_tokenize_command(config),
         perturbgen_directory=config.project.perturbgen_directory,

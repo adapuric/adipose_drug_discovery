@@ -10,6 +10,7 @@ from typing import cast
 import anndata as ad  # type: ignore[import]
 import numpy as np
 import pandas as pd
+import scanpy as sc  # type: ignore[import]
 from scipy import sparse  # type: ignore[import]
 
 from run_scripts.perturbgen.config import PerturbGenConfig
@@ -21,9 +22,19 @@ logger = logging.getLogger(__name__)
 
 
 def prepare_adipose_adata(config: PerturbGenConfig) -> Path:
-    """Prepare paired raw-count adipocytes for PerturbGen tokenization."""
+    """Prepare paired adipocyte counts for PerturbGen tokenization.
+
+    When `prepare.regress_out_obs` is set, the written X holds the regressed
+    counts shifted to a minimum of 0 instead of raw counts.
+    """
     # Load config and adata
     settings = config.prepare
+    if settings is None:
+        raise ValueError(
+            "This config has no prepare section; tokenization reads "
+            f"{config.tokenizer_input_h5ad_path} directly. Skip the prepare "
+            "stage (PBS: STAGES=tokenize:masking)."
+        )
     adata = _load_adipose(settings)
 
     # Select paired donors without copying the complete AnnData
@@ -50,6 +61,19 @@ def prepare_adipose_adata(config: PerturbGenConfig) -> Path:
         final_var=final_var,
         settings=settings,
     )
+
+    # Regress QC covariates out of the counts, then shift so none are negative
+    if settings.regress_out_obs:
+        sc.pp.regress_out(prepared, keys=list(settings.regress_out_obs))
+        regressed = np.asarray(prepared.X)
+        shift = -regressed.min()
+        regressed += shift
+        prepared.X = regressed
+        logger.info(
+            "Regressed out %s and shifted counts by %.6g",
+            ", ".join(settings.regress_out_obs),
+            shift,
+        )
 
     output_path = config.output_h5ad_path
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -83,6 +107,7 @@ def _load_adipose(settings: PrepareConfig) -> ad.AnnData:
             settings.donor_col,
             settings.condition_col,
             settings.source_state_col,
+            *settings.regress_out_obs,
         )
         if column not in adata_obs
     ]:
