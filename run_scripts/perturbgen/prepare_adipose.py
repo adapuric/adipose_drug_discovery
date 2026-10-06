@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
 
@@ -62,18 +63,8 @@ def prepare_adipose_adata(config: PerturbGenConfig) -> Path:
         settings=settings,
     )
 
-    # Regress QC covariates out of the counts, then shift so none are negative
     if settings.regress_out_obs:
-        sc.pp.regress_out(prepared, keys=list(settings.regress_out_obs))
-        regressed = np.asarray(prepared.X)
-        shift = -regressed.min()
-        regressed += shift
-        prepared.X = regressed
-        logger.info(
-            "Regressed out %s and shifted counts by %.6g",
-            ", ".join(settings.regress_out_obs),
-            shift,
-        )
+        _regress_out_covariates(prepared, covariates=settings.regress_out_obs)
 
     output_path = config.output_h5ad_path
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -269,6 +260,29 @@ def _build_prepared_anndata(
         prepared.obs_names_make_unique()
 
     return prepared
+
+
+def _regress_out_covariates(
+    adata: ad.AnnData,
+    *,
+    covariates: Sequence[str],
+) -> None:
+    """Regress obs covariates out of `adata.X` in place.
+
+    PerturbGen treats its input as counts, so the residuals are shifted to a
+    minimum of 0 rather than left negative.
+    """
+    sc.pp.regress_out(adata, keys=list(covariates))
+
+    regressed = np.asarray(adata.X)
+    shift = -regressed.min()
+    regressed += shift
+    adata.X = regressed
+    logger.info(
+        "Regressed out %s and shifted values by %.6g",
+        ", ".join(covariates),
+        shift,
+    )
 
 
 def _validate_raw_counts(
