@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 from collections.abc import Mapping
@@ -12,6 +13,9 @@ import numpy as np
 import pandas as pd
 from matplotlib.figure import Figure
 
+from add.baselines.edits import coexpression_edit_effects
+from add.baselines.edits import edit_effect_agreement
+from add.baselines.edits import generic_edit_effects
 from add.data import load_rescue_table
 from add.perturb import PerturbSignatures
 from add.perturb import load_perturb_signatures
@@ -41,6 +45,18 @@ from add.visualization.style import set_matplotlib_publication_parameters
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class _NaiveBaselineSettings:
+    """Validated thresholds shared by the naive edit predictors."""
+
+    condition_col: str
+    minimum_nuclei: int
+    minimum_reference_cpm: float
+    minimum_shared_genes: int
+    minimum_reference_edits: int
+    chunk_size: int
 
 
 def validate_adipose_panel(
@@ -197,6 +213,7 @@ def perturbgen_report(
             "figsize",
             "point_size",
             "color_limit",
+            "naive_baselines",
         ),
     )
     if not isinstance(config.get("png", False), bool):
@@ -210,6 +227,12 @@ def perturbgen_report(
     )
     effects, qc, provenance_rows, native_transitions, identities = (
         _read_perturbgen_runs(runs, config=config, root=root)
+    )
+    naive_settings = _naive_baseline_settings(config)
+    naive_requests = (
+        None
+        if naive_settings is None
+        else _naive_edit_requests(runs, root=root)
     )
     for optional_path in ("benchmark_path", "gene_mapping_path"):
         if config.get(optional_path) is not None:
@@ -227,6 +250,13 @@ def perturbgen_report(
             provenance_rows,
             destination,
         )
+        if naive_requests is not None:
+            logger.info(
+                "Naive edit baselines: generic-edit mean for %d edits; "
+                "co-expression contrast for %d edits.",
+                len(naive_requests),
+                naive_requests["coexpression_path"].notna().sum(),
+            )
         return destination
     combined = pd.concat(effects, ignore_index=True)
     if config.get("gene_mapping_path") is not None:
@@ -254,6 +284,19 @@ def perturbgen_report(
         "support_qc.csv": support,
         "run_classification.csv": pd.DataFrame(provenance_rows),
     }
+    if naive_settings is not None and naive_requests is not None:
+        tables.update(
+            _naive_edit_baselines(
+                combined,
+                naive_requests,
+                settings=naive_settings,
+                config=config,
+            )
+        )
+        identities.extend(
+            input_identity(path)
+            for path in naive_requests["coexpression_path"].dropna().unique()
+        )
     destination = prepare_report_directory(destination)
     figure_manifest = _perturbation_figures(
         destination, combined, support, config=config
@@ -278,6 +321,9 @@ def perturbgen_report(
             "run_manifest": input_identity(manifest_path),
             "inputs": identities,
             "runs": runs,
+            "naive_baselines": None
+            if naive_settings is None
+            else dataclasses.asdict(naive_settings),
             "interpretation": (
                 "predicted edit sensitivity; no experimental edited outcomes"
             ),
@@ -351,6 +397,209 @@ def _read_perturbgen_runs(
             native_transitions.append((pd.read_parquet(native_path), run))
             identities.append(input_identity(native_path))
     return effects, qc, provenance_rows, native_transitions, identities
+
+
+def _naive_baseline_settings(
+    config: Mapping[str, object],
+) -> _NaiveBaselineSettings | None:
+    """Validate optional naive-baseline thresholds."""
+    values = config.get("naive_baselines")
+    if values is None:
+        return None
+    if not isinstance(values, dict):
+        raise TypeError("naive_baselines must be a mapping or null")
+    fields = {
+        field.name for field in dataclasses.fields(_NaiveBaselineSettings)
+    }
+    if unknown := set(values) - fields:
+        raise ValueError(f"Unknown naive_baselines keys: {sorted(unknown)}")
+    condition_col = values.get("condition_col", "condition")
+    if not isinstance(condition_col, str) or not condition_col:
+        raise ValueError("naive_baselines.condition_col must be a column name")
+    return _NaiveBaselineSettings(
+        condition_col=condition_col,
+        minimum_nuclei=_integer(values, "minimum_nuclei", 20),
+        minimum_reference_cpm=_number(values, "minimum_reference_cpm", 1.0),
+        minimum_shared_genes=_integer(
+            values, "minimum_shared_genes", 50, minimum=2
+        ),
+        minimum_reference_edits=_integer(values, "minimum_reference_edits", 2),
+        chunk_size=_integer(values, "chunk_size", 4096),
+    )
+
+
+def _naive_edit_requests(runs: list[object], *, root: Path) -> pd.DataFrame:
+    """Validate the edit metadata each naive predictor needs."""
+    rows: list[dict[str, object]] = []
+    for run in runs:
+        if not isinstance(run, dict):
+            raise TypeError("Each run must be a mapping")
+        label = f"{run['run_id']}/{run['edit_id']}"
+        if run.get("edit_mode") not in {"mask", "pad", "delete", "overexpress"}:
+            raise ValueError(f"{label}: naive baselines require edit_mode")
+        if run.get("edit_sequence") not in {"src", "tgt"}:
+            raise ValueError(f"{label}: naive baselines require edit_sequence")
+        path = condition = None
+        if run.get("coexpression_h5ad_path") is not None:
+            path = configured_path(run, "coexpression_h5ad_path", root=root)
+            condition = run.get("edited_condition")
+            if not path.is_file():
+                raise FileNotFoundError(f"{label}: missing {path}")
+            if not isinstance(condition, str) or not condition:
+                raise ValueError(
+                    f"{label}: coexpression_h5ad_path requires the "
+                    "edited_condition label of the edited sequence"
+                )
+        rows.append(
+            {
+                "run_id": str(run["run_id"]),
+                "edit_id": str(run["edit_id"]),
+                "edit_mode": run["edit_mode"],
+                "edit_sequence": run["edit_sequence"],
+                "edited_genes": tuple(run["edited_genes"]),
+                "coexpression_path": path,
+                "edited_condition": condition,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _naive_edit_baselines(
+    effects: pd.DataFrame,
+    requests: pd.DataFrame,
+    *,
+    settings: _NaiveBaselineSettings,
+    config: Mapping[str, object],
+) -> dict[str, pd.DataFrame]:
+    """Compare model edits with co-expression and generic-edit predictions."""
+    model = effects.loc[
+        effects["model"].str.startswith("perturbgen:")
+        & effects["scale"].isin(
+            ("shared_unedited_log1p_cpm", "log2_ratio_of_nucleus_means_plus1")
+        )
+    ].merge(
+        requests[["run_id", "edit_id", "edit_mode", "edit_sequence"]],
+        on=["run_id", "edit_id"],
+        validate="many_to_one",
+    )
+    reference = pd.Series(np.nan, index=model.index)
+    for column in ("unedited_prediction_count", "mean_unperturbed_count"):
+        if column in model:
+            reference = reference.fillna(model[column])
+    model["reference_count"] = reference
+    contrast = _coexpression_contrasts(
+        requests, settings=settings, config=config
+    )
+
+    predictions = [contrast]
+    agreements: list[pd.DataFrame] = []
+    for keys, group in model.groupby(
+        ["run_id", "edit_mode", "edit_sequence", "scale"], sort=True
+    ):
+        run_id, _, _, scale = (str(key) for key in keys)
+        generic = generic_edit_effects(
+            group, minimum_reference_edits=settings.minimum_reference_edits
+        ).assign(run_id=run_id, scale=scale)
+        predictions.append(generic)
+        for comparator, naive in (
+            ("generic-edit-mean", generic),
+            (
+                "coexpression-contrast",
+                contrast.loc[contrast["run_id"].eq(run_id)],
+            ),
+        ):
+            agreements.append(
+                edit_effect_agreement(
+                    group,
+                    naive,
+                    minimum_nuclei=settings.minimum_nuclei,
+                    minimum_reference_cpm=settings.minimum_reference_cpm,
+                    minimum_shared_genes=settings.minimum_shared_genes,
+                ).assign(run_id=run_id, comparator=comparator, scale=scale)
+            )
+
+    # Report why an edit has no contrast instead of a generic missing status.
+    agreement = pd.concat(agreements, ignore_index=True)
+    reasons = {
+        (row.run_id, row.edit_id): "unsupported_edit_mode"
+        if row.edit_mode == "overexpress"
+        else "not_configured"
+        for row in requests.itertuples()
+        if row.edit_mode == "overexpress" or pd.isna(row.coexpression_path)
+    }
+    reason = pd.Series(
+        [
+            reasons.get(key)
+            for key in zip(
+                agreement["run_id"], agreement["edit_id"], strict=True
+            )
+        ],
+        index=agreement.index,
+        dtype=object,
+    ).where(agreement["comparator"].eq("coexpression-contrast"))
+    agreement["status"] = reason.fillna(agreement["status"])
+    agreement["comparator_status"] = reason.fillna(
+        agreement["comparator_status"]
+    )
+
+    summary = donor_metric_summary(
+        agreement,
+        value_columns=("agreement_pearson", "agreement_spearman"),
+        group_columns=("run_id", "comparator", "scale", "edit_id", "state"),
+        random_seed=_integer(config, "random_seed", 42, minimum=0),
+        bootstrap_draws=_integer(config, "bootstrap_draws", 2000),
+        confidence_level=_number(config, "confidence_level", 0.95),
+    )
+    return {
+        "naive_edit_baselines.parquet": pd.concat(
+            predictions, ignore_index=True
+        ),
+        "edit_baseline_agreement.csv": agreement,
+        "edit_baseline_agreement_summary.csv": summary,
+    }
+
+
+def _coexpression_contrasts(
+    requests: pd.DataFrame,
+    *,
+    settings: _NaiveBaselineSettings,
+    config: Mapping[str, object],
+) -> pd.DataFrame:
+    """Read each configured expression input once per run and condition."""
+    contrasts: list[pd.DataFrame] = []
+    knockouts = requests.loc[
+        requests["coexpression_path"].notna()
+        & requests["edit_mode"].ne("overexpress")
+    ]
+    for (run_id, path, condition), edits in knockouts.groupby(
+        ["run_id", "coexpression_path", "edited_condition"], sort=True
+    ):
+        contrast = coexpression_edit_effects(
+            Path(str(path)),
+            edited_genes=dict(
+                zip(edits["edit_id"], edits["edited_genes"], strict=True)
+            ),
+            condition=str(condition),
+            donor_col=str(config.get("donor_col", "Donor")),
+            state_col=str(config.get("state_col", "cell_states_adipocytes")),
+            condition_col=settings.condition_col,
+            minimum_nuclei=settings.minimum_nuclei,
+            chunk_size=settings.chunk_size,
+        )
+        contrasts.append(contrast.assign(run_id=str(run_id)))
+    if not contrasts:
+        return pd.DataFrame(
+            columns=[
+                "run_id",
+                "edit_id",
+                "donor_id",
+                "state",
+                "gene_id",
+                "delta",
+                "status",
+            ]
+        )
+    return pd.concat(contrasts, ignore_index=True)
 
 
 def _transition_figures(

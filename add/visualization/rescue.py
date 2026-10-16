@@ -13,6 +13,8 @@ from matplotlib import pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
+from add.visualization.style import _fit_row_labels
+from add.visualization.style import set_matplotlib_publication_parameters
 from add.visualization.tables import _ordered_values
 from add.visualization.tables import _require_columns
 
@@ -23,11 +25,22 @@ def plot_rescue_summary(
     top_genes: int = 24,
     state_order: Sequence[str] | None = None,
     figsize: tuple[float, float] | None = None,
+    cell_size: float = 0.13,
 ) -> tuple[Figure, Axes]:
     """Plot the strongest rescue statistics across adipocyte states.
 
     Genes are selected by their largest absolute moderated t statistic in any
-    state. Empty state-gene combinations remain visibly missing.
+    state, the statistic the drug baselines score against. Empty state-gene
+    combinations are grey crosses, never zero. Row labels give the paired
+    donors per state.
+
+    Args:
+      rescue_results: Per-gene rows with `gene`, `state`, `moderated_t` and
+        `n_pairs`.
+      top_genes: Number of genes shown.
+      state_order: States listed first, in this order.
+      figsize: Overall inches; overrides `cell_size`.
+      cell_size: Inches per state-gene cell when `figsize` is None.
 
     Example Usage:
       >>> figure, axis = plot_rescue_summary(rescue_results, top_genes=20)
@@ -63,31 +76,77 @@ def plot_rescue_summary(
         .pivot(index="state", columns="gene", values="moderated_t")
         .reindex(index=states, columns=selected_genes)
     )
-
-    width = max(3.4, 0.18 * len(selected_genes))
-    height = max(1.8, 0.28 * len(states))
-    figure, axis = plt.subplots(figsize=figsize or (width, height))
-    limit = float(np.nanmax(np.abs(matrix.to_numpy(dtype=float))))
-    color_map = mpl.colormaps["RdBu_r"].copy()
-    color_map.set_bad("#e6e6e6")
-    image = axis.imshow(
-        np.ma.masked_invalid(matrix.to_numpy(dtype=float)),
-        aspect="auto",
-        cmap=color_map,
-        norm=mcolors.TwoSlopeNorm(vmin=-limit, vcenter=0.0, vmax=limit),
-    )
-
+    values = matrix.to_numpy(dtype=float)
+    limit = float(np.nanmax(np.abs(values)))
     support = finite.groupby("state", sort=False)["n_pairs"].max()
-    axis.set_yticks(np.arange(len(states)))
-    axis.set_yticklabels(
-        [f"{state} (donors={int(support.get(state, 0))})" for state in states]
+
+    dimensions = figsize or (
+        1.4 + cell_size * len(selected_genes),
+        0.75 + cell_size * len(states),
     )
-    axis.set_xticks(np.arange(len(selected_genes)))
-    axis.set_xticklabels(selected_genes, rotation=60, ha="right")
-    axis.set_xlabel("Gene")
-    axis.set_ylabel("Adipocyte state")
-    axis.set_title("Paired baseline → weight-loss rescue vector")
-    colorbar = figure.colorbar(image, ax=axis, fraction=0.025, pad=0.02)
-    colorbar.set_label("Moderated t (weight loss - baseline)")
-    figure.tight_layout()
+    with plt.rc_context():
+        set_matplotlib_publication_parameters()
+        figure, axis = plt.subplots(figsize=dimensions, layout="constrained")
+
+        color_map = mpl.colormaps["RdBu_r"].copy()
+        color_map.set_bad("#e6e6e6")
+        image = axis.imshow(
+            np.ma.masked_invalid(values),
+            aspect="auto",
+            cmap=color_map,
+            norm=mcolors.TwoSlopeNorm(vmin=-limit, vcenter=0.0, vmax=limit),
+        )
+        axis.set_box_aspect(len(states) / len(selected_genes))
+        missing_y, missing_x = np.nonzero(~np.isfinite(values))
+        axis.scatter(
+            missing_x,
+            missing_y,
+            marker="x",
+            s=6,
+            c="#999999",
+            linewidths=0.4,
+        )
+
+        axis.set_yticks(
+            np.arange(len(states)),
+            [
+                f"{state} ({int(support.get(state, 0))} donors)"
+                for state in states
+            ],
+        )
+        axis.set_xticks(
+            np.arange(len(selected_genes)), selected_genes, rotation=90
+        )
+        for label in axis.get_xticklabels():
+            label.set_fontstyle("italic")
+        axis.tick_params(length=0, pad=1.5)
+        axis.spines[:].set_visible(False)
+
+        colorbar = figure.colorbar(
+            image,
+            ax=axis,
+            shrink=0.35,
+            aspect=10,
+            pad=0.02,
+            anchor=(0.0, 1.0),
+        )
+        colorbar.set_label("Moderated t")
+        # Top-anchored cells leave layout slack at the bottom, where saving
+        # crops it; the colour bar would otherwise centre them.
+        axis.set_anchor("N")
+        figure.suptitle(
+            "Paired rescue vector (weight loss - baseline): top genes by "
+            "largest |t| in any state",
+            x=0.01,
+            ha="left",
+            fontsize=plt.rcParams["axes.titlesize"],
+        )
+        if figsize is None:
+            _fit_row_labels(
+                figure,
+                axis,
+                content_width=cell_size * len(selected_genes),
+                margin=0.9,
+            )
+
     return figure, axis

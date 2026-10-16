@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from add.baselines.evaluation import _context_score_summary
+from add.baselines.evaluation import _prediction_fields
 from add.baselines.evaluation import split_signature_contexts
 from add.baselines.scoring import _canonical_score_row
 from add.baselines.scoring import _mimic_fields
@@ -22,7 +23,6 @@ from add.baselines.signatures import _context_label
 from add.baselines.signatures import _dense_matrix
 from add.baselines.signatures import _dense_row
 from add.baselines.signatures import _require_finite
-from add.baselines.signatures import _root_mean_squared_error
 from add.baselines.signatures import _signature_ids
 from add.baselines.signatures import _signature_positions
 from add.perturb import PerturbSignatures
@@ -74,14 +74,6 @@ def evaluate_train_mean(
     signature_ids = _signature_ids(signatures)
     rows: list[dict[str, object]] = []
     for position in test_positions:
-        observed = _dense_row(signatures.delta, position)
-        score = _mimic_fields(
-            prediction,
-            signatures.genes,
-            observed,
-            signatures.genes,
-            minimum_shared_genes=minimum_shared_genes,
-        )
         rows.append(
             {
                 "signature_id": signature_ids[position],
@@ -90,14 +82,12 @@ def evaluate_train_mean(
                     signatures.meta.iloc[position],
                     context_cols,
                 ),
-                "prediction_pearson": score["score_mimic"],
-                "prediction_spearman": score["score_spearman"],
-                "prediction_rmse": _root_mean_squared_error(
+                **_prediction_fields(
                     prediction,
-                    observed,
+                    _dense_row(signatures.delta, position),
+                    signatures.genes,
+                    minimum_shared_genes=minimum_shared_genes,
                 ),
-                "n_shared_genes": score["n_shared_genes"],
-                "score_status": score["score_status"],
                 "n_training_signatures": len(train_ids),
                 "random_seed": random_seed,
                 "baseline": "train-mean",
@@ -129,6 +119,7 @@ def score_train_mean(
         signatures,
         training_signature_ids=training_signature_ids,
     )
+
     training_positions = _signature_positions(
         signatures,
         training_signature_ids,
@@ -220,6 +211,7 @@ def score_mean_drug(
         drug_col=drug_col,
         context_cols=context_cols,
     )
+
     context_scores = _score_all_signatures(
         context_means,
         rescue_vectors,
@@ -232,6 +224,7 @@ def score_mean_drug(
         mechanism_col=mechanism_col,
         workers=workers,
     )
+
     ranked = _score_all_signatures(
         drug_means,
         rescue_vectors,

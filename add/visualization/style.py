@@ -1,9 +1,17 @@
-"""Shared publication styling for adipose discovery figures."""
+"""Shared publication styling for adipose discovery figures.
+
+Figures follow the NASP atlas design: 5 pt type, 0.25 pt axes, geometry set
+in inches per row or cell, constrained layout, Okabe-Ito colours and grey
+for missing values.
+"""
 
 from pathlib import Path
 
+import numpy as np
 from matplotlib import font_manager
 from matplotlib import pyplot as plt
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 
 
 def set_matplotlib_publication_parameters() -> None:
@@ -79,3 +87,42 @@ def _publication_font_families() -> list[str]:
         for font in selected_fonts
     )
     return [alias, "sans-serif"]
+
+
+def _style_row_axis(axis: Axes) -> None:
+    """Style a panel of labelled rows: open frame, tickless rows."""
+    axis.spines[["top", "right", "left"]].set_visible(False)
+    axis.tick_params(axis="y", length=0, pad=2)
+    axis.tick_params(axis="x", length=2, pad=1.5)
+
+
+def _fit_row_labels(
+    figure: Figure,
+    axis: Axes,
+    *,
+    content_width: float,
+    margin: float = 0.3,
+) -> None:
+    """Widen the figure so the longest row label fits beside its content.
+
+    `content_width` is the data area, and `margin` the colour bar or padding,
+    in inches.
+    """
+    labels = axis.get_yticklabels()
+    if not labels:
+        return
+
+    label_width = max(text.get_window_extent().width for text in labels)
+    needed = label_width / figure.dpi + content_width + margin
+    if needed > figure.get_figwidth():
+        figure.set_figwidth(needed)
+
+
+def _color_limit(values: np.ndarray, quantile: float) -> float:
+    """Symmetric colour limit: a quantile of absolute finite values, or 1."""
+    if not 0.5 <= quantile <= 1:
+        raise ValueError("color_quantile must lie between 0.5 and 1")
+
+    finite = np.abs(values[np.isfinite(values)])
+    limit = float(np.quantile(finite, quantile)) if finite.size else 1.0
+    return limit or 1.0

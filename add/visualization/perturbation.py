@@ -9,6 +9,9 @@ import numpy as np
 import pandas as pd
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from matplotlib.transforms import blended_transform_factory
+
+from add.visualization.style import set_matplotlib_publication_parameters
 
 
 def plot_edit_effect_heatmap(
@@ -174,50 +177,114 @@ def plot_transition_errors(
     metrics: pd.DataFrame,
     *,
     figsize: tuple[float, float] | None = None,
-    point_size: float = 18,
+    point_size: float = 5.0,
+    column_width: float = 0.16,
+    height: float = 2.0,
 ) -> tuple[Figure, Axes]:
-    """Show donor-level change prediction errors with explicit model support.
+    """Show each held-out donor's change-prediction error under every model.
+
+    Columns are models, grouped by state. Grey lines join one held-out
+    donor's errors across models, so the paired comparison is visible, and
+    the black bar is the mean over donors with a finite error. Column labels
+    give those donors. Errors are the RMSE of the paired log1p-CPM change on
+    each fold's evaluation genes; lower is better.
+
+    Args:
+      metrics: Rows with `model`, `state`, `donor_id` and `delta_rmse`, and
+        optionally `comparison_class`.
+      figsize: Overall inches; overrides `column_width` and `height`.
+      point_size: Donor marker area in points squared.
+      column_width: Inches per model column when `figsize` is None.
+      height: Figure height in inches when `figsize` is None.
 
     Example Usage:
-      >>> figure, axis = plot_transition_errors(metrics, figsize=(7, 4))
+      >>> figure, axis = plot_transition_errors(metrics, column_width=0.2)
     """
     if not {"model", "state", "donor_id", "delta_rmse"} <= set(metrics):
         raise ValueError("Transition table lacks donor-level error columns")
-    table = metrics.copy()
-    table["label"] = (
-        table[["model", "state"]].astype(str).agg(" | ".join, axis=1)
+    if not np.isfinite(point_size) or point_size <= 0:
+        raise ValueError("point_size must be positive")
+    if metrics.duplicated(["model", "state", "donor_id"]).any():
+        raise ValueError("Duplicate independent donor values in a plot group")
+
+    table = metrics.assign(
+        delta_rmse=pd.to_numeric(metrics["delta_rmse"], errors="coerce")
     )
-    figure, axis = _donor_points(
-        table,
-        value_col="delta_rmse",
-        label_col="label",
-        figsize=figsize,
-        point_size=point_size,
-        label_width=40,
-    )
-    axis.set_xlabel("RMSE of paired log1p-CPM change (lower is better)")
+    states = sorted(table["state"].astype(str).unique())
+    colors = _transition_model_colors(table["model"])
+    models = list(colors)
+    n_columns = len(states) * (len(models) + 1) - 1
+    dimensions = figsize or (0.7 + column_width * n_columns, height)
     transductive = (
         "comparison_class" in metrics
         and metrics["comparison_class"]
         .eq("donor_heldout_transductive_preprocessing")
         .any()
     )
-    axis.set_title(
-        "Donor-held-out transition; transductive preprocessing"
-        if transductive
-        else "Donor-held-out surgery transition: individual errors"
-    )
+
+    with plt.rc_context():
+        set_matplotlib_publication_parameters()
+        figure, axis = _figure(figsize, dimensions)
+
+        ticks: list[float] = []
+        labels: list[str] = []
+        for index, state in enumerate(states):
+            positions, state_labels = _draw_paired_donors(
+                axis,
+                table.loc[table["state"].astype(str).eq(state)],
+                colors=colors,
+                start=index * (len(models) + 1),
+                point_size=point_size,
+            )
+            ticks += positions
+            labels += state_labels
+            axis.text(
+                float(np.mean(positions)),
+                1.0,
+                state,
+                transform=blended_transform_factory(
+                    axis.transData, axis.transAxes
+                ),
+                ha="center",
+                va="bottom",
+            )
+
+        axis.set_xticks(ticks, labels, rotation=90)
+        axis.set_xlim(-0.6, n_columns - 0.4)
+        axis.set_ylim(bottom=0)
+        axis.set_ylabel("Change RMSE (log1p-CPM)", labelpad=2)
+        axis.tick_params(axis="x", length=0, pad=1.5)
+        axis.tick_params(axis="y", length=2, pad=1.5)
+        axis.spines[["top", "right"]].set_visible(False)
+        figure.suptitle(
+            "Donor-held-out surgery change: prediction RMSE per held-out "
+            "donor (lower is better)"
+            + (
+                "\nTransductive preprocessing (transductive_hvg policy)"
+                if transductive
+                else ""
+            ),
+            x=0.01,
+            ha="left",
+            fontsize=plt.rcParams["axes.titlesize"],
+        )
+
     return figure, axis
 
 
 def plot_transition_delta_scatter(
     predictions: pd.DataFrame,
     *,
-    figsize: tuple[float, float] = (5, 5),
+    figsize: tuple[float, float] = (1.8, 1.9),
     maximum_points: int = 5000,
     random_seed: int = 42,
+    marker_size: float = 1.5,
 ) -> tuple[Figure, Axes]:
     """Plot declared paired changes without selecting favorable genes.
+
+    Each point is one held-out donor and gene; up to `maximum_points` are
+    sampled with `random_seed`. Pairs share donors and genes, so the plot is
+    descriptive. The dashed line is equality.
 
     Example Usage:
       >>> figure, axis = plot_transition_delta_scatter(
@@ -247,26 +314,45 @@ def plot_transition_delta_scatter(
         raise ValueError("No finite change pairs are available")
     if len(table) > maximum_points:
         table = table.sample(maximum_points, random_state=random_seed)
-    figure, axis = plt.subplots(figsize=_figure_size(figsize, (5, 5)))
-    axis.scatter(
-        table["observed_delta"],
-        table["predicted_delta"],
-        s=5,
-        alpha=0.3,
-        rasterized=True,
-    )
-    bounds = table[["observed_delta", "predicted_delta"]].to_numpy()
-    low, high = float(bounds.min()), float(bounds.max())
-    axis.plot([low, high], [low, high], color="grey", linewidth=0.8)
-    axis.set(
-        xlabel="Observed weightloss - baseline (log1p-CPM)",
-        ylabel="Predicted change (log1p-CPM)",
-        title=(
-            f"{table['model'].iloc[0]} | {table['state'].iloc[0]}\n"
-            "Descriptive donor/gene pairs"
-        ),
-    )
-    figure.tight_layout()
+
+    with plt.rc_context():
+        set_matplotlib_publication_parameters()
+        figure, axis = _figure(figsize, (1.8, 1.9))
+
+        axis.scatter(
+            table["observed_delta"],
+            table["predicted_delta"],
+            s=marker_size,
+            alpha=0.3,
+            color="#0072B2",
+            edgecolors="none",
+            rasterized=True,
+        )
+        bounds = table[["observed_delta", "predicted_delta"]].to_numpy()
+        low, high = float(bounds.min()), float(bounds.max())
+        axis.plot(
+            [low, high],
+            [low, high],
+            color="#777777",
+            linestyle="--",
+            linewidth=0.5,
+        )
+        axis.axhline(0.0, color="#AAAAAA", linewidth=0.4, zorder=0)
+        axis.axvline(0.0, color="#AAAAAA", linewidth=0.4, zorder=0)
+        axis.set_box_aspect(1)
+        axis.set_xlabel(
+            "Observed weight loss - baseline (log1p-CPM)", labelpad=2
+        )
+        axis.set_ylabel("Predicted change (log1p-CPM)", labelpad=2)
+        axis.tick_params(length=2, pad=1.5)
+        axis.spines[["top", "right"]].set_visible(False)
+        axis.set_title(
+            f"{table['model'].iloc[0]} | {table['state'].iloc[0]}: "
+            f"{len(table):,} donor-gene pairs",
+            loc="left",
+            pad=3,
+        )
+
     return figure, axis
 
 
@@ -328,6 +414,96 @@ def _effect_label(effects: pd.DataFrame) -> str:
     if scale == "shared_unedited_log1p_cpm":
         return "Edited - unedited log1p-CPM (shared unedited size factor)"
     return "Edited - unedited summed model counts"
+
+
+def _transition_model_colors(models: pd.Series) -> dict[str, str]:
+    """Map each model to its colour, in display order.
+
+    The no-change and mean-shift references come first, then the adipose
+    ridge, then other exports sorted by name.
+    """
+    reference_colors = {
+        "adipose-no-change": "#999999",
+        "adipose-mean-shift": "#E69F00",
+        "adipose-ridge": "#0072B2",
+    }
+    export_colors = ("#009E73", "#CC79A7", "#56B4E9", "#D55E00")
+    observed = set(models.astype(str))
+
+    colors = {
+        model: color
+        for model, color in reference_colors.items()
+        if model in observed
+    }
+    for index, model in enumerate(sorted(observed - set(reference_colors))):
+        colors[model] = export_colors[index % len(export_colors)]
+    return colors
+
+
+def _draw_paired_donors(
+    axis: Axes,
+    state_rows: pd.DataFrame,
+    *,
+    colors: dict[str, str],
+    start: int,
+    point_size: float,
+) -> tuple[list[float], list[str]]:
+    """Draw one state's donor errors joined across models.
+
+    Returns the column positions and their labels with finite donor counts.
+    """
+    present = [model for model in colors if model in set(state_rows["model"])]
+    positions = np.arange(start, start + len(present), dtype=float)
+    errors = state_rows.pivot(
+        index="donor_id", columns="model", values="delta_rmse"
+    ).reindex(columns=present)
+
+    for donor_errors in errors.to_numpy(dtype=float):
+        finite = np.isfinite(donor_errors)
+        axis.plot(
+            positions[finite],
+            donor_errors[finite],
+            color="#CCCCCC",
+            linewidth=0.3,
+            zorder=1,
+        )
+
+    labels: list[str] = []
+    for position, model in zip(positions, present, strict=True):
+        values = errors[model].to_numpy(dtype=float)
+        values = values[np.isfinite(values)]
+        labels.append(f"{model} ({len(values)})")
+        if not values.size:
+            continue
+
+        axis.scatter(
+            np.full(len(values), position),
+            values,
+            s=point_size,
+            color=colors[model],
+            edgecolors="white",
+            linewidths=0.2,
+            zorder=2,
+        )
+        axis.plot(
+            [position - 0.3, position + 0.3],
+            [values.mean()] * 2,
+            color="black",
+            linewidth=0.75,
+            zorder=3,
+        )
+
+    return positions.tolist(), labels
+
+
+def _figure(
+    size: tuple[float, float] | None,
+    default: tuple[float, float],
+) -> tuple[Figure, Axes]:
+    """Create one constrained-layout axes of validated size in inches."""
+    return plt.subplots(
+        figsize=_figure_size(size, default), layout="constrained"
+    )
 
 
 def _figure_size(

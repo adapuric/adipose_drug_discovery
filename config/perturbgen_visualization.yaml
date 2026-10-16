@@ -15,3 +15,10 @@ png: true
 figsize: null
 point_size: 18.0
 color_limit: null
+naive_baselines:
+  condition_col: condition
+  minimum_nuclei: 20
+  minimum_reference_cpm: 1.0
+  minimum_shared_genes: 50
+  minimum_reference_edits: 2
+  chunk_size: 4096

@@ -6,6 +6,8 @@
     "edit_mode": "mask",
     "edit_sequence": "src",
     "result_path": "path/to/native_result.h5ad",
+    "coexpression_h5ad_path": "path/to/prepared_adipocytes.h5ad",
+    "edited_condition": "obese",
     "native_revision": null,
     "checkpoint_id": null,
     "config_id": null,

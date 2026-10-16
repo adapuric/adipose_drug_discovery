@@ -21,6 +21,11 @@ def _parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--config", type=Path, default=Path("config/adipose_benchmark.yaml")
     )
+    parser.add_argument(
+        "--pseudobulk",
+        type=Path,
+        help="Raw-count pseudobulk H5AD; overrides pseudobulk_path.",
+    )
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
@@ -30,6 +35,7 @@ def main() -> None:
     """Validate inputs or publish a complete donor-benchmark report."""
     args = _parse_arguments()
     logging.basicConfig(level=logging.INFO)
+
     values, root = read_report_config(
         args.config,
         allowed_keys=("pseudobulk_path", "output_path", "parameters"),
@@ -38,10 +44,14 @@ def main() -> None:
     if not isinstance(parameters, dict):
         raise TypeError("parameters must be a mapping")
     settings = benchmark_settings(parameters)
-    source = configured_path(values, "pseudobulk_path", root=root)
+
+    source = args.pseudobulk or configured_path(
+        values, "pseudobulk_path", root=root
+    )
     destination = args.output_dir or configured_path(
         values, "output_path", root=root
     )
+
     if args.dry_run:
         baseline, _, exclusions = paired_donor_profiles(
             ad.read_h5ad(source), settings=settings

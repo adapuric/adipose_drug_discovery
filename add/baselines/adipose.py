@@ -83,12 +83,14 @@ def fit_adipose_ridge(
         raise ValueError("feature and component limits must be positive")
     if not np.isfinite(alpha) or alpha < 0:
         raise ValueError("alpha must be finite and nonnegative")
+
     variance = baseline.var(axis=0, ddof=0)
     eligible = variance.loc[variance > 0]
     if eligible.empty:
         raise ValueError("no_variable_input_features")
     order = np.lexsort((eligible.index.astype(str), -eligible.to_numpy()))
     genes = tuple(eligible.index[order[:maximum_input_genes]].astype(str))
+
     scaler = StandardScaler()
     scaled = scaler.fit_transform(baseline.loc[:, list(genes)])
     pca = PCA(
@@ -98,6 +100,7 @@ def fit_adipose_ridge(
         random_state=random_seed,
     )
     predictors = pca.fit_transform(scaled)
+
     ridge = Ridge(alpha=alpha, fit_intercept=True)
     ridge.fit(predictors, changes.loc[baseline.index].to_numpy(dtype=float))
     return AdiposeRidge(

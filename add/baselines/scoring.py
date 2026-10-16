@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import functools
 import multiprocessing as mp
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from multiprocessing.connection import Connection
+from multiprocessing.process import BaseProcess
 
 import numpy as np
 import pandas as pd
@@ -16,9 +19,6 @@ from add.baselines.signatures import _signature_ids
 from add.perturb import PerturbSignatures
 from add.scoring import score_mimicry
 from add.scoring import weighted_cmap_connectivity
-
-
-_PARALLEL_SIGNATURES: PerturbSignatures | None = None
 
 
 def _score_all_signatures(
@@ -35,73 +35,122 @@ def _score_all_signatures(
     workers: int = 1,
 ) -> pd.DataFrame:
     """Score every signature against every state using shared alignment."""
+    score_state = functools.partial(
+        _score_signature_state,
+        drug_col=drug_col,
+        context_cols=(
+            None if context_col is None else _context_columns(context_col)
+        ),
+        minimum_shared_genes=minimum_shared_genes,
+        source=source,
+        baseline=baseline,
+        target_col=target_col,
+        mechanism_col=mechanism_col,
+    )
+    return _score_rescue_states(
+        score_state, signatures, rescue_vectors, workers=workers
+    )
+
+
+def _score_rescue_states(
+    score_state: Callable[[PerturbSignatures, str, pd.Series], pd.DataFrame],
+    signatures: PerturbSignatures,
+    rescue_vectors: Mapping[str, pd.Series],
+    *,
+    workers: int,
+) -> pd.DataFrame:
+    """Apply `score_state` to every rescue state, optionally in parallel.
+
+    Rows follow the sorted state order whatever the number of workers.
+    """
     if workers < 1:
         raise ValueError("workers must be at least 1")
-    context_cols = (
-        None if context_col is None else _context_columns(context_col)
-    )
     rescues = _validated_rescue_vectors(rescue_vectors)
-    resolved_workers = min(workers, len(rescues))
-    tasks = [
-        (
-            state,
-            rescue,
-            drug_col,
-            context_cols,
-            minimum_shared_genes,
-            source,
-            baseline,
-            target_col,
-            mechanism_col,
-        )
-        for state, rescue in rescues
-    ]
-    if resolved_workers == 1:
-        frames = [_score_signature_state(signatures, *task) for task in tasks]
+    n_workers = min(workers, len(rescues))
+    if n_workers == 1:
+        frames = [
+            score_state(signatures, state, rescue) for state, rescue in rescues
+        ]
     else:
-        global _PARALLEL_SIGNATURES
-        _PARALLEL_SIGNATURES = signatures
-        try:
-            context = mp.get_context("fork")
-            with context.Pool(processes=resolved_workers) as pool:
-                frames = pool.starmap(_score_signature_state_worker, tasks)
-        finally:
-            _PARALLEL_SIGNATURES = None
+        frames = _forked_state_scores(
+            score_state, signatures, rescues, n_workers=n_workers
+        )
     return pd.concat(frames, axis=0, ignore_index=True)
 
 
-def _score_signature_state_worker(
-    state: str,
-    rescue: pd.Series,
-    drug_col: str,
-    context_cols: tuple[str, ...] | None,
-    minimum_shared_genes: int,
-    source: str,
-    baseline: str,
-    target_col: str | None,
-    mechanism_col: str | None,
-) -> pd.DataFrame:
-    """Score one rescue state in a forked worker."""
-    if _PARALLEL_SIGNATURES is None:
-        raise RuntimeError("parallel signature matrix is unavailable")
-    return _score_signature_state(
-        _PARALLEL_SIGNATURES,
-        state,
-        rescue,
-        drug_col,
-        context_cols,
-        minimum_shared_genes,
-        source,
-        baseline,
-        target_col,
-        mechanism_col,
+def _forked_state_scores(
+    score_state: Callable[[PerturbSignatures, str, pd.Series], pd.DataFrame],
+    signatures: PerturbSignatures,
+    rescues: Sequence[tuple[str, pd.Series]],
+    *,
+    n_workers: int,
+) -> list[pd.DataFrame]:
+    """Score interleaved chunks of states in forked child processes.
+
+    Children inherit `signatures` from the parent's memory, so the large
+    signature matrix is never pickled; only each state's score table returns.
+    """
+    context = mp.get_context("fork")
+    processes: list[BaseProcess] = []
+    receivers: list[Connection] = []
+    scores: dict[str, pd.DataFrame] = {}
+    try:
+        for start in range(n_workers):
+            receiver, sender = context.Pipe(duplex=False)
+            process = context.Process(
+                target=_send_state_scores,
+                args=(
+                    score_state,
+                    signatures,
+                    rescues[start::n_workers],
+                    sender,
+                ),
+            )
+            process.start()
+            sender.close()
+            processes.append(process)
+            receivers.append(receiver)
+
+        for process, receiver in zip(processes, receivers, strict=True):
+            try:
+                scores.update(receiver.recv())
+            except EOFError as error:
+                process.join()
+                raise RuntimeError(
+                    f"Scoring worker {process.name} exited with code "
+                    f"{process.exitcode}; its traceback is logged above."
+                ) from error
+    except BaseException:
+        for process in processes:
+            process.terminate()
+        raise
+    finally:
+        for process in processes:
+            process.join()
+    return [scores[state] for state, _ in rescues]
+
+
+def _send_state_scores(
+    score_state: Callable[[PerturbSignatures, str, pd.Series], pd.DataFrame],
+    signatures: PerturbSignatures,
+    rescues: Sequence[tuple[str, pd.Series]],
+    sender: Connection,
+) -> None:
+    """Score one chunk of states in a forked child and send the tables."""
+    sender.send(
+        {
+            state: score_state(signatures, state, rescue)
+            for state, rescue in rescues
+        }
     )
+    sender.close()
 
 
 def _score_signature_state(
     signatures: PerturbSignatures,
     state: str,
     rescue: pd.Series,
+    *,
     drug_col: str,
     context_cols: tuple[str, ...] | None,
     minimum_shared_genes: int,
@@ -115,6 +164,7 @@ def _score_signature_state(
     signature_ids = _signature_ids(signatures)
     rescue_values = rescue.to_numpy(dtype=float)
     rescue_genes = tuple(str(gene) for gene in rescue.index)
+
     for position, (_, metadata) in enumerate(signatures.meta.iterrows()):
         score = _mimic_fields(
             _dense_row(signatures.delta, position),
@@ -126,6 +176,7 @@ def _score_signature_state(
         context: object = pd.NA
         if context_cols is not None:
             context = _context_label(metadata, context_cols)
+
         rows.append(
             _canonical_score_row(
                 state=state,
@@ -136,13 +187,12 @@ def _score_signature_state(
                 drug=str(metadata[drug_col]),
                 signature_id=signature_ids[position],
                 context=context,
-                n_external_contexts=int(
-                    str(metadata.get("n_external_contexts", 1))
-                ),
+                n_external_contexts=int(metadata.get("n_external_contexts", 1)),
                 target=_metadata_annotation(metadata, target_col),
                 mechanism=_metadata_annotation(metadata, mechanism_col),
             )
         )
+
     return pd.DataFrame(rows)
 
 
@@ -187,6 +237,7 @@ def _canonical_score_row(
     resolved_primary = score["score_mimic"]
     if primary_score is not None:
         resolved_primary = primary_score
+
     row: dict[str, object] = {
         "signature_id": signature_id,
         "drug": drug,

@@ -14,7 +14,11 @@ from sklearn.decomposition import PCA  # type: ignore[import]
 from sklearn.linear_model import Ridge  # type: ignore[import]
 from sklearn.preprocessing import OneHotEncoder  # type: ignore[import]
 
+from add.baselines.evaluation import _comparator_fields
+from add.baselines.evaluation import _prediction_fields
 from add.baselines.evaluation import split_signature_contexts
+from add.baselines.means import mean_drug_signatures
+from add.baselines.means import train_mean_signature
 from add.baselines.scoring import _canonical_score_row
 from add.baselines.scoring import _mimic_fields
 from add.baselines.scoring import _rank_scores
@@ -30,11 +34,11 @@ from add.baselines.signatures import _gene_positions
 from add.baselines.signatures import _metadata_annotation_from_frame
 from add.baselines.signatures import _require_finite
 from add.baselines.signatures import _required_string_values
-from add.baselines.signatures import _root_mean_squared_error
 from add.baselines.signatures import _signature_ids
 from add.baselines.signatures import _signature_positions
 from add.baselines.signatures import _subset_signatures
 from add.baselines.signatures import _with_signature_ids
+from add.baselines.signatures import select_signature_genes
 from add.perturb import PerturbSignatures
 
 
@@ -70,19 +74,13 @@ def fit_pca_ridge(
     """Fit PCA(control state) plus one-hot drug identity to measured deltas."""
     if signatures.control is None:
         raise ValueError("PCA + ridge requires matched control expression.")
-    context_cols = _context_columns(context_col)
-    required_columns = [drug_col, *context_cols]
-    missing_columns = [
-        column for column in required_columns if column not in signatures.meta
-    ]
-    if missing_columns:
-        raise KeyError(
-            f"Perturbation metadata lacks model columns: {missing_columns}"
-        )
-    if n_components < 1:
-        raise ValueError("n_components must be at least 1.")
-    if ridge_alpha < 0.0 or not np.isfinite(ridge_alpha):
-        raise ValueError("ridge_alpha must be finite and non-negative.")
+    context_cols = _validated_model_columns(
+        signatures.meta,
+        drug_col=drug_col,
+        context_col=context_col,
+        n_components=n_components,
+        ridge_alpha=ridge_alpha,
+    )
 
     gene_positions = _select_model_gene_positions(
         signatures,
@@ -96,36 +94,20 @@ def fit_pca_ridge(
     _require_finite(delta, name="perturbation deltas")
 
     context_values = _context_keys(signatures.meta, context_cols)
-    unique_control = _mean_matrix_by_labels(control, context_values)
-    resolved_components = min(
-        n_components,
-        unique_control.shape[0],
-        unique_control.shape[1],
+    pca = _fit_context_pca(
+        control,
+        context_values,
+        n_components=n_components,
+        random_seed=random_seed,
     )
-    pca = PCA(
-        n_components=resolved_components,
-        svd_solver="full",
-        random_state=random_seed,
-    )
-    pca.fit(unique_control)
-    control_components = pca.transform(control)
 
     drug_values = _required_string_values(signatures.meta, drug_col)
-    drug_encoder = OneHotEncoder(
-        handle_unknown="error",
-        sparse_output=False,
-        dtype=np.float64,
+    drug_encoder, ridge = _fit_drug_ridge(
+        pca.transform(control),
+        drug_values,
+        delta,
+        ridge_alpha=ridge_alpha,
     )
-    encoded_drugs = np.asarray(
-        drug_encoder.fit_transform(drug_values.reshape(-1, 1)),
-        dtype=float,
-    )
-    predictors = np.concatenate(
-        [control_components, encoded_drugs],
-        axis=1,
-    )
-    ridge = Ridge(alpha=ridge_alpha)
-    ridge.fit(predictors, delta)
 
     drug_metadata = _summarize_drug_metadata(
         signatures.meta,
@@ -199,54 +181,18 @@ def build_adipose_starting_expression(
             f"duplicates: {duplicate_pairs.to_dict(orient='records')}"
         )
 
-    if count_layer is None:
-        matrix = pseudobulk.X
-    else:
-        matrix = pseudobulk.layers[count_layer]
-    if matrix is None:
-        raise ValueError("Pseudobulk contains no count matrix.")
-    selected_counts = matrix[baseline_positions]
-    baseline_matrix = (
-        sp.csr_matrix(selected_counts)
-        if sp.issparse(selected_counts)
-        else np.asarray(selected_counts)
+    log_cpm = _baseline_log_cpm(
+        pseudobulk,
+        baseline_positions,
+        count_layer=count_layer,
+        counts_per_million=counts_per_million,
     )
-    baseline_counts = _dense_matrix(baseline_matrix)
-    _require_finite(baseline_counts, name="adipose pseudobulk counts")
-    if (baseline_counts < 0.0).any():
-        raise ValueError("Adipose pseudobulk counts must be non-negative.")
-    library_sizes = baseline_counts.sum(axis=1)
-    if (library_sizes <= 0.0).any():
-        raise ValueError(
-            "Adipose baseline pseudobulk contains an empty library."
-        )
-    log_cpm = np.log1p(
-        baseline_counts / library_sizes[:, np.newaxis] * counts_per_million
+    state_profiles, retained_states = _equal_donor_state_means(
+        log_cpm,
+        states=baseline_obs[state_col].astype(str).to_numpy(),
+        donors=baseline_obs[donor_col].astype(str).to_numpy(),
+        paired_donors=paired_donors,
     )
-
-    states = baseline_obs[state_col].astype(str).to_numpy()
-    donors = baseline_obs[donor_col].astype(str).to_numpy()
-    state_profiles: list[np.ndarray] = []
-    retained_states: list[str] = []
-    for state in sorted(set(states)):
-        state_mask = states == state
-        if paired_donors is not None:
-            if state not in paired_donors:
-                continue
-            allowed = {str(donor) for donor in paired_donors[state]}
-            state_mask &= np.fromiter(
-                (donor in allowed for donor in donors),
-                dtype=bool,
-                count=len(donors),
-            )
-        if not state_mask.any():
-            continue
-        state_profiles.append(np.mean(log_cpm[state_mask], axis=0))
-        retained_states.append(state)
-    if not state_profiles:
-        raise ValueError(
-            "No baseline adipose states remain after donor selection."
-        )
 
     return pd.DataFrame(
         np.vstack(state_profiles),
@@ -262,27 +208,11 @@ def predict_pca_ridge(
     drug_ids: Sequence[str],
 ) -> PerturbSignatures:
     """Predict drug deltas for every supplied adipose starting state."""
-    if not starting_expression.index.is_unique:
-        raise ValueError("Starting-expression state labels must be unique.")
-    if not starting_expression.columns.is_unique:
-        raise ValueError("Starting-expression gene labels must be unique.")
-    missing_genes = [
-        gene for gene in model.genes if gene not in starting_expression.columns
-    ]
-    if missing_genes:
-        raise ValueError(
-            f"Starting expression lacks model genes: {missing_genes[:10]}"
-        )
-    requested_drugs = [str(drug) for drug in drug_ids]
-    if not requested_drugs:
-        raise ValueError("At least one drug must be requested.")
-    if len(requested_drugs) != len(set(requested_drugs)):
-        raise ValueError("Requested drug IDs must be unique.")
-    unknown = sorted(set(requested_drugs).difference(model.training_drugs))
-    if unknown:
-        raise ValueError(
-            f"PCA + ridge cannot encode drugs absent from training: {unknown}"
-        )
+    requested_drugs = _validated_prediction_request(
+        model,
+        starting_expression,
+        drug_ids=drug_ids,
+    )
 
     states = starting_expression.index.astype(str).tolist()
     state_matrix = starting_expression.loc[:, list(model.genes)].to_numpy(
@@ -304,25 +234,13 @@ def predict_pca_ridge(
             repeated_start,
             requested_drugs,
         )
+
         prediction_rows.extend(predicted)
         control_rows.extend(repeated_start)
-        for drug in requested_drugs:
-            record: dict[Hashable, object] = {
-                "drug": drug,
-                "state": state,
-                "context": f"adipose:{state}",
-                "source": "tahoe",
-                "n_external_contexts": int(
-                    cast(
-                        int | np.integer,
-                        model.drug_metadata.loc[drug, "n_external_contexts"],
-                    )
-                ),
-            }
-            for column, value in model.drug_metadata.loc[drug].items():
-                if column not in record:
-                    record[column] = value
-            metadata_rows.append(record)
+        metadata_rows.extend(
+            _prediction_metadata(model, drug, state=state)
+            for drug in requested_drugs
+        )
 
     meta = _with_signature_ids(
         pd.DataFrame(metadata_rows),
@@ -357,17 +275,26 @@ def evaluate_pca_ridge(
     minimum_shared_genes: int = 3,
     split_group_cols: str | Sequence[str] | None = None,
 ) -> pd.DataFrame:
-    """Evaluate PCA + ridge on contexts absent from model fitting."""
+    """Evaluate PCA + ridge on contexts absent from model fitting.
+
+    Every held-out signature is also predicted by two comparators fitted on
+    the training signatures only: the drug-agnostic train mean, and the drug
+    mean, which averages that drug equally over its training contexts. Both
+    use the model's genes. `evaluation_group` labels the held-out split unit
+    for clustered summaries.
+    """
     if signatures.control is None:
         raise ValueError("PCA + ridge evaluation requires control expression.")
+    group_cols = _context_columns(
+        context_col if split_group_cols is None else split_group_cols
+    )
     train_ids, test_ids = split_signature_contexts(
         signatures,
-        context_col=context_col
-        if split_group_cols is None
-        else split_group_cols,
+        context_col=group_cols,
         test_fraction=test_fraction,
         random_seed=random_seed,
     )
+
     training = _subset_signatures(signatures, train_ids)
     model = fit_pca_ridge(
         training,
@@ -382,6 +309,18 @@ def evaluate_pca_ridge(
         random_seed=random_seed,
     )
 
+    matched_training = select_signature_genes(training, model.genes)
+    train_mean = train_mean_signature(matched_training)
+    drug_means = mean_drug_signatures(
+        matched_training,
+        drug_col=drug_col,
+        context_col=context_col,
+    )
+    drug_mean_positions = {
+        str(drug): position
+        for position, drug in enumerate(drug_means.meta[drug_col])
+    }
+
     test_positions = _signature_positions(signatures, test_ids)
     model_gene_positions = _gene_positions(signatures.genes, model.genes)
     test_control = _dense_matrix(
@@ -390,9 +329,6 @@ def evaluate_pca_ridge(
     observed_delta = _dense_matrix(
         signatures.delta[test_positions][:, model_gene_positions]
     )
-    mean_prediction = _dense_matrix(
-        training.delta[:, _gene_positions(training.genes, model.genes)]
-    ).mean(axis=0)
     test_meta = signatures.meta.iloc[test_positions]
     context_cols = _context_columns(context_col)
     test_drugs = _required_string_values(test_meta, drug_col).tolist()
@@ -401,73 +337,45 @@ def evaluate_pca_ridge(
     rows: list[dict[str, object]] = []
     for row_index, position in enumerate(test_positions):
         drug = test_drugs[row_index]
-        base = {
-            "signature_id": signature_ids[position],
-            "drug": drug,
-            "context": _context_label(
-                test_meta.iloc[row_index],
-                context_cols,
-            ),
-            "random_seed": random_seed,
-            "baseline": "pca-ridge",
-            "evaluation_genes": "|".join(model.genes),
-            "n_training_signatures": len(train_ids),
-        }
-        mean_score = _mimic_fields(
-            mean_prediction,
-            model.genes,
-            observed_delta[row_index],
-            model.genes,
-            minimum_shared_genes=minimum_shared_genes,
-        )
-        base.update(
-            train_mean_pearson=mean_score["score_mimic"],
-            train_mean_spearman=mean_score["score_spearman"],
-            train_mean_status=mean_score["score_status"],
-            train_mean_rmse=_root_mean_squared_error(
-                mean_prediction,
-                observed_delta[row_index],
-            ),
-        )
-        if drug not in model.training_drugs:
-            rows.append(
-                {
-                    **base,
-                    "prediction_pearson": np.nan,
-                    "prediction_spearman": np.nan,
-                    "prediction_rmse": np.nan,
-                    "n_shared_genes": len(model.genes),
-                    "score_status": "unseen_drug",
-                }
-            )
-            continue
-
-        predicted = _predict_pca_ridge_matrix(
-            model,
-            test_control[row_index : row_index + 1],
-            [drug],
-        )[0]
         observed = observed_delta[row_index]
-        score = _mimic_fields(
-            predicted,
-            model.genes,
-            observed,
-            model.genes,
-            minimum_shared_genes=minimum_shared_genes,
-        )
         rows.append(
             {
-                **base,
-                "prediction_pearson": score["score_mimic"],
-                "prediction_spearman": score["score_spearman"],
-                "prediction_rmse": _root_mean_squared_error(
-                    predicted,
-                    observed,
+                "signature_id": signature_ids[position],
+                "drug": drug,
+                "context": _context_label(
+                    test_meta.iloc[row_index], context_cols
                 ),
-                "n_shared_genes": score["n_shared_genes"],
-                "score_status": score["score_status"],
+                "evaluation_group": _context_label(
+                    test_meta.iloc[row_index], group_cols
+                ),
+                "random_seed": random_seed,
+                "baseline": "pca-ridge",
+                "evaluation_genes": "|".join(model.genes),
+                "n_training_signatures": len(train_ids),
+                **_comparator_fields(
+                    "train_mean",
+                    train_mean,
+                    observed,
+                    model.genes,
+                    minimum_shared_genes=minimum_shared_genes,
+                ),
+                **_drug_mean_fields(
+                    drug_means,
+                    drug_mean_positions.get(drug),
+                    observed,
+                    model.genes,
+                    minimum_shared_genes=minimum_shared_genes,
+                ),
+                **_heldout_prediction_fields(
+                    model,
+                    drug,
+                    test_control[row_index : row_index + 1],
+                    observed,
+                    minimum_shared_genes=minimum_shared_genes,
+                ),
             }
         )
+
     return pd.DataFrame(rows).sort_values(
         "signature_id",
         kind="stable",
@@ -485,6 +393,7 @@ def score_pca_ridge(
     if "state" not in predicted_signatures.meta:
         raise KeyError("Predicted signature metadata lacks 'state'.")
     rescue_by_state = dict(_validated_rescue_vectors(rescue_vectors))
+
     rows: list[dict[str, object]] = []
     signature_ids = _signature_ids(predicted_signatures)
     for position, (_, metadata) in enumerate(
@@ -495,6 +404,7 @@ def score_pca_ridge(
             raise KeyError(
                 f"No rescue vector was supplied for state {state!r}."
             )
+
         rescue = rescue_by_state[state]
         score = _mimic_fields(
             _dense_row(predicted_signatures.delta, position),
@@ -513,12 +423,250 @@ def score_pca_ridge(
                 drug=str(metadata["drug"]),
                 signature_id=signature_ids[position],
                 context=str(metadata["context"]),
-                n_external_contexts=int(str(metadata["n_external_contexts"])),
+                n_external_contexts=int(metadata["n_external_contexts"]),
                 target=metadata.get("target", pd.NA),
                 mechanism=metadata.get("mechanism", pd.NA),
             )
         )
+
     return _rank_scores(pd.DataFrame(rows), score_col="score")
+
+
+def _validated_model_columns(
+    metadata: pd.DataFrame,
+    *,
+    drug_col: str,
+    context_col: str | Sequence[str],
+    n_components: int,
+    ridge_alpha: float,
+) -> tuple[str, ...]:
+    """Check model metadata and settings; return the context columns."""
+    context_cols = _context_columns(context_col)
+    required_columns = [drug_col, *context_cols]
+    missing_columns = [
+        column for column in required_columns if column not in metadata
+    ]
+    if missing_columns:
+        raise KeyError(
+            f"Perturbation metadata lacks model columns: {missing_columns}"
+        )
+    if n_components < 1:
+        raise ValueError("n_components must be at least 1.")
+    if ridge_alpha < 0.0 or not np.isfinite(ridge_alpha):
+        raise ValueError("ridge_alpha must be finite and non-negative.")
+
+    return context_cols
+
+
+def _fit_context_pca(
+    control: np.ndarray,
+    context_values: Sequence[tuple[str, ...]],
+    *,
+    n_components: int,
+    random_seed: int,
+) -> PCA:
+    """Fit PCA on one mean control profile per external context.
+
+    Contexts with many signatures therefore do not dominate the components.
+    """
+    unique_control = _mean_matrix_by_labels(control, context_values)
+    resolved_components = min(
+        n_components,
+        unique_control.shape[0],
+        unique_control.shape[1],
+    )
+
+    pca = PCA(
+        n_components=resolved_components,
+        svd_solver="full",
+        random_state=random_seed,
+    )
+    pca.fit(unique_control)
+    return pca
+
+
+def _fit_drug_ridge(
+    control_components: np.ndarray,
+    drug_values: np.ndarray,
+    delta: np.ndarray,
+    *,
+    ridge_alpha: float,
+) -> tuple[OneHotEncoder, Ridge]:
+    """Fit deltas on control components plus one-hot drug identity."""
+    drug_encoder = OneHotEncoder(
+        handle_unknown="error",
+        sparse_output=False,
+        dtype=np.float64,
+    )
+    encoded_drugs = np.asarray(
+        drug_encoder.fit_transform(drug_values.reshape(-1, 1)),
+        dtype=float,
+    )
+
+    predictors = np.concatenate(
+        [control_components, encoded_drugs],
+        axis=1,
+    )
+    ridge = Ridge(alpha=ridge_alpha)
+    ridge.fit(predictors, delta)
+    return drug_encoder, ridge
+
+
+def _baseline_log_cpm(
+    pseudobulk: ad.AnnData,
+    baseline_positions: np.ndarray,
+    *,
+    count_layer: str | None,
+    counts_per_million: float,
+) -> np.ndarray:
+    """Library-normalize baseline pseudobulk counts to log1p CPM."""
+    if count_layer is None:
+        matrix = pseudobulk.X
+    else:
+        matrix = pseudobulk.layers[count_layer]
+    if matrix is None:
+        raise ValueError("Pseudobulk contains no count matrix.")
+
+    selected_counts = matrix[baseline_positions]
+    baseline_matrix = (
+        sp.csr_matrix(selected_counts)
+        if sp.issparse(selected_counts)
+        else np.asarray(selected_counts)
+    )
+    baseline_counts = _dense_matrix(baseline_matrix)
+    _require_finite(baseline_counts, name="adipose pseudobulk counts")
+    if (baseline_counts < 0.0).any():
+        raise ValueError("Adipose pseudobulk counts must be non-negative.")
+
+    library_sizes = baseline_counts.sum(axis=1)
+    if (library_sizes <= 0.0).any():
+        raise ValueError(
+            "Adipose baseline pseudobulk contains an empty library."
+        )
+    return np.log1p(
+        baseline_counts / library_sizes[:, np.newaxis] * counts_per_million
+    )
+
+
+def _equal_donor_state_means(
+    log_cpm: np.ndarray,
+    *,
+    states: np.ndarray,
+    donors: np.ndarray,
+    paired_donors: Mapping[str, Sequence[str]] | None,
+) -> tuple[list[np.ndarray], list[str]]:
+    """Average donor profiles per state, keeping only paired donors if given.
+
+    States absent from `paired_donors`, or left without donors, are dropped.
+    """
+    state_profiles: list[np.ndarray] = []
+    retained_states: list[str] = []
+    for state in sorted(set(states)):
+        state_mask = states == state
+        if paired_donors is not None:
+            if state not in paired_donors:
+                continue
+            allowed = {str(donor) for donor in paired_donors[state]}
+            state_mask &= np.fromiter(
+                (donor in allowed for donor in donors),
+                dtype=bool,
+                count=len(donors),
+            )
+        if not state_mask.any():
+            continue
+
+        state_profiles.append(np.mean(log_cpm[state_mask], axis=0))
+        retained_states.append(state)
+
+    if not state_profiles:
+        raise ValueError(
+            "No baseline adipose states remain after donor selection."
+        )
+    return state_profiles, retained_states
+
+
+def _validated_prediction_request(
+    model: PcaRidgeModel,
+    starting_expression: pd.DataFrame,
+    *,
+    drug_ids: Sequence[str],
+) -> list[str]:
+    """Check starting states and drugs; return the requested drug IDs."""
+    if not starting_expression.index.is_unique:
+        raise ValueError("Starting-expression state labels must be unique.")
+    if not starting_expression.columns.is_unique:
+        raise ValueError("Starting-expression gene labels must be unique.")
+    missing_genes = [
+        gene for gene in model.genes if gene not in starting_expression.columns
+    ]
+    if missing_genes:
+        raise ValueError(
+            f"Starting expression lacks model genes: {missing_genes[:10]}"
+        )
+
+    requested_drugs = [str(drug) for drug in drug_ids]
+    if not requested_drugs:
+        raise ValueError("At least one drug must be requested.")
+    if len(requested_drugs) != len(set(requested_drugs)):
+        raise ValueError("Requested drug IDs must be unique.")
+    unknown = sorted(set(requested_drugs).difference(model.training_drugs))
+    if unknown:
+        raise ValueError(
+            f"PCA + ridge cannot encode drugs absent from training: {unknown}"
+        )
+    return requested_drugs
+
+
+def _prediction_metadata(
+    model: PcaRidgeModel,
+    drug: str,
+    *,
+    state: str,
+) -> dict[Hashable, object]:
+    """Describe one predicted drug delta in one adipose starting state."""
+    record: dict[Hashable, object] = {
+        "drug": drug,
+        "state": state,
+        "context": f"adipose:{state}",
+        "source": "tahoe",
+        "n_external_contexts": int(
+            cast(
+                int | np.integer,
+                model.drug_metadata.loc[drug, "n_external_contexts"],
+            )
+        ),
+    }
+    for column, value in model.drug_metadata.loc[drug].items():
+        if column not in record:
+            record[column] = value
+    return record
+
+
+def _heldout_prediction_fields(
+    model: PcaRidgeModel,
+    drug: str,
+    control: np.ndarray,
+    observed: np.ndarray,
+    *,
+    minimum_shared_genes: int,
+) -> dict[str, object]:
+    """Score the model's held-out prediction, or mark an unseen drug."""
+    if drug not in model.training_drugs:
+        return {
+            "prediction_pearson": np.nan,
+            "prediction_spearman": np.nan,
+            "prediction_rmse": np.nan,
+            "n_shared_genes": len(model.genes),
+            "score_status": "unseen_drug",
+        }
+
+    predicted = _predict_pca_ridge_matrix(model, control, [drug])[0]
+    return _prediction_fields(
+        predicted,
+        observed,
+        model.genes,
+        minimum_shared_genes=minimum_shared_genes,
+    )
 
 
 def _select_model_gene_positions(
@@ -548,6 +696,37 @@ def _select_model_gene_positions(
     gene_names = np.asarray(signatures.genes, dtype=str)[candidate_positions]
     order = np.lexsort((gene_names, -variance))
     return candidate_positions[order[:max_model_genes]]
+
+
+def _drug_mean_fields(
+    drug_means: PerturbSignatures,
+    position: int | None,
+    observed: np.ndarray,
+    genes: Sequence[str],
+    *,
+    minimum_shared_genes: int,
+) -> dict[str, object]:
+    """Score the training drug mean, or mark a drug absent from training."""
+    if position is None:
+        return {
+            "drug_mean_pearson": np.nan,
+            "drug_mean_spearman": np.nan,
+            "drug_mean_status": "unseen_drug",
+            "drug_mean_rmse": np.nan,
+            "drug_mean_n_contexts": 0,
+        }
+    return {
+        **_comparator_fields(
+            "drug_mean",
+            drug_means.delta[position],
+            observed,
+            genes,
+            minimum_shared_genes=minimum_shared_genes,
+        ),
+        "drug_mean_n_contexts": int(
+            drug_means.meta["n_external_contexts"].iloc[position]
+        ),
+    }
 
 
 def _predict_pca_ridge_matrix(
@@ -598,6 +777,7 @@ def _summarize_drug_metadata(
                 mechanism_col,
             ),
         }
+
         for column in group.columns:
             if (
                 column == drug_col
@@ -609,6 +789,7 @@ def _summarize_drug_metadata(
                 pd.Series(group[column], index=group.index)
             )
         rows.append(record)
+
     result = pd.DataFrame(rows).set_index("drug", drop=False)
     return result
 

@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 
+from add.baselines.adipose import AdiposeRidge
 from add.baselines.adipose import fit_adipose_mean_shift
 from add.baselines.adipose import fit_adipose_ridge
 from add.baselines.adipose import predict_adipose_mean_shift
@@ -257,156 +258,34 @@ def evaluate_adipose_transition(
         pseudobulk, settings=resolved
     )
     folds = donor_folds(baseline.index.get_level_values("donor_id"))
+    states = sorted(set(baseline.index.get_level_values("state")))
+
     predictions: list[pd.DataFrame] = []
     metrics: list[dict[str, object]] = []
     genes: list[dict[str, object]] = []
     fits: list[dict[str, object]] = []
-    for fold_id, split in folds.groupby("fold_id", sort=True):
-        heldout = str(split.loc[split["role"].eq("test"), "donor_id"].iloc[0])
-        for state in sorted(set(baseline.index.get_level_values("state"))):
-            x = cast(pd.DataFrame, baseline.xs(state, level="state"))
-            y = cast(pd.DataFrame, target.xs(state, level="state"))
-            if heldout not in x.index:
+    heldout_donors = folds.loc[
+        folds["role"].eq("test"), ["fold_id", "donor_id"]
+    ]
+    for fold_id, heldout in heldout_donors.itertuples(index=False):
+        for state in states:
+            if (heldout, state) not in baseline.index:
                 continue
-            training = x.index[x.index != heldout]
-            present = (
-                (
-                    np.expm1(x.loc[training])
-                    * 1_000_000
-                    / resolved.normalization_target
+            state_predictions, state_metrics, state_genes, state_fits = (
+                _evaluate_heldout_state(
+                    cast(pd.DataFrame, baseline.xs(state, level="state")),
+                    cast(pd.DataFrame, target.xs(state, level="state")),
+                    fold_id=str(fold_id),
+                    heldout=str(heldout),
+                    state=state,
+                    settings=resolved,
                 )
-                >= resolved.minimum_gene_cpm
-            ) | (
-                (
-                    np.expm1(y.loc[training])
-                    * 1_000_000
-                    / resolved.normalization_target
-                )
-                >= resolved.minimum_gene_cpm
             )
-            selected = x.columns[
-                present.sum(axis=0) >= resolved.minimum_gene_donors
-            ]
-            for ordinal, gene in enumerate(selected):
-                genes.append(
-                    {
-                        "fold_id": fold_id,
-                        "state": state,
-                        "gene_id": gene,
-                        "role": "evaluation",
-                        "ordinal": ordinal,
-                    }
-                )
-            x_train = x.reindex(index=training, columns=selected)
-            changes = y.reindex(index=training, columns=selected) - x_train
-            x_test = x.reindex(index=[heldout], columns=selected)
-            observed = (
-                y.loc[[heldout], selected].iloc[0]
-                - x.loc[[heldout], selected].iloc[0]
-            ).to_numpy()
-            for model in (
-                "adipose-no-change",
-                "adipose-mean-shift",
-                "adipose-ridge",
-            ):
-                base = {
-                    "task": "surgery_transition",
-                    "model": model,
-                    "fold_id": fold_id,
-                    "donor_id": heldout,
-                    "state": state,
-                    "n_training_donors": len(training),
-                    "n_genes": len(selected),
-                    "scale": "log1p_cpm",
-                    "comparison_class": (
-                        "donor_heldout_transductive_preprocessing"
-                        if resolved.preprocessing_policy == "transductive_hvg"
-                        else "heldout_target_blind"
-                    ),
-                }
-                status = "ok"
-                prediction = np.full(len(selected), np.nan)
-                if len(selected) < resolved.minimum_shared_genes:
-                    status = "insufficient_shared_genes"
-                elif model == "adipose-no-change":
-                    prediction = np.zeros(len(selected))
-                elif model == "adipose-mean-shift":
-                    if len(training) < resolved.mean_shift_minimum_donors:
-                        status = "insufficient_training_donors"
-                    else:
-                        fitted_mean = fit_adipose_mean_shift(
-                            changes,
-                            minimum_donors=resolved.mean_shift_minimum_donors,
-                        )
-                        prediction = (
-                            predict_adipose_mean_shift(fitted_mean, x_test)
-                            .iloc[0]
-                            .to_numpy()
-                        )
-                elif len(training) < resolved.ridge_minimum_donors:
-                    status = "insufficient_training_donors"
-                elif not (x_train.var(axis=0, ddof=0) > 0).any():
-                    status = "no_variable_input_features"
-                else:
-                    fitted_ridge = fit_adipose_ridge(
-                        x_train,
-                        changes,
-                        minimum_donors=resolved.ridge_minimum_donors,
-                        maximum_input_genes=resolved.ridge_maximum_genes,
-                        n_components=resolved.ridge_components,
-                        alpha=resolved.ridge_alpha,
-                        random_seed=resolved.random_seed,
-                    )
-                    prediction = (
-                        predict_adipose_ridge(fitted_ridge, x_test)
-                        .iloc[0]
-                        .to_numpy()
-                    )
-                    fits.append(
-                        base
-                        | {
-                            "effective_components": (
-                                fitted_ridge.pca.n_components_
-                            ),
-                            "alpha": resolved.ridge_alpha,
-                        }
-                    )
-                    for ordinal, gene in enumerate(fitted_ridge.input_genes):
-                        genes.append(
-                            {
-                                "fold_id": fold_id,
-                                "state": state,
-                                "gene_id": gene,
-                                "role": "ridge_input",
-                                "ordinal": ordinal,
-                            }
-                        )
-                metric = change_prediction_metrics(
-                    prediction,
-                    observed,
-                    selected,
-                    minimum_shared_genes=resolved.minimum_shared_genes,
-                )
-                metrics.append(base | metric | {"status": status})
-                predictions.append(
-                    pd.DataFrame(
-                        base
-                        | {
-                            "gene_id": selected,
-                            "baseline_expression": x_test.iloc[0].to_numpy(),
-                            "observed_expression": y.loc[
-                                [heldout], selected.tolist()
-                            ]
-                            .iloc[0]
-                            .to_numpy(),
-                            "predicted_expression": x_test.iloc[0].to_numpy()
-                            + prediction,
-                            "observed_delta": observed,
-                            "predicted_delta": prediction,
-                            "status": status,
-                        }
-                    )
-                )
+            predictions.extend(state_predictions)
+            metrics.extend(state_metrics)
+            genes.extend(state_genes)
+            fits.extend(state_fits)
+
     metric_table = pd.DataFrame(metrics)
     comparisons = paired_model_comparisons(metric_table)
     return {
@@ -615,3 +494,190 @@ def write_adipose_benchmark(
         },
     )
     return destination
+
+
+def _evaluate_heldout_state(
+    baseline: pd.DataFrame,
+    target: pd.DataFrame,
+    *,
+    fold_id: str,
+    heldout: str,
+    state: str,
+    settings: BenchmarkSettings,
+) -> tuple[
+    list[pd.DataFrame],
+    list[dict[str, object]],
+    list[dict[str, object]],
+    list[dict[str, object]],
+]:
+    """Fit each model on training donors and predict the held-out donor.
+
+    Args:
+      baseline: Donor-indexed baseline log1p CPM for one state.
+      target: Donor-indexed weightloss log1p CPM aligned to `baseline`.
+      fold_id: Outer fold identifier.
+      heldout: Donor excluded from every fitting and gene-selection step.
+      state: Adipocyte state being evaluated.
+      settings: Benchmark thresholds and model settings.
+
+    Returns:
+      Prediction tables, metric rows, fold gene rows and ridge fit rows.
+    """
+    training = baseline.index[baseline.index != heldout]
+    selected = _training_genes(
+        baseline.loc[training], target.loc[training], settings=settings
+    )
+    genes: list[dict[str, object]] = [
+        {
+            "fold_id": fold_id,
+            "state": state,
+            "gene_id": gene,
+            "role": "evaluation",
+            "ordinal": ordinal,
+        }
+        for ordinal, gene in enumerate(selected)
+    ]
+    baseline_train = baseline.reindex(index=training, columns=selected)
+    changes = target.reindex(index=training, columns=selected) - baseline_train
+    baseline_test = baseline.reindex(index=[heldout], columns=selected)
+    observed = (
+        target.loc[[heldout], selected].iloc[0]
+        - baseline.loc[[heldout], selected].iloc[0]
+    ).to_numpy()
+
+    predictions: list[pd.DataFrame] = []
+    metrics: list[dict[str, object]] = []
+    fits: list[dict[str, object]] = []
+    for model in ("adipose-no-change", "adipose-mean-shift", "adipose-ridge"):
+        base = {
+            "task": "surgery_transition",
+            "model": model,
+            "fold_id": fold_id,
+            "donor_id": heldout,
+            "state": state,
+            "n_training_donors": len(training),
+            "n_genes": len(selected),
+            "scale": "log1p_cpm",
+            "comparison_class": (
+                "donor_heldout_transductive_preprocessing"
+                if settings.preprocessing_policy == "transductive_hvg"
+                else "heldout_target_blind"
+            ),
+        }
+        prediction, status, ridge = _predict_change(
+            model, baseline_train, changes, baseline_test, settings=settings
+        )
+        if ridge is not None:
+            fits.append(
+                base
+                | {
+                    "effective_components": ridge.pca.n_components_,
+                    "alpha": settings.ridge_alpha,
+                }
+            )
+            genes.extend(
+                {
+                    "fold_id": fold_id,
+                    "state": state,
+                    "gene_id": gene,
+                    "role": "ridge_input",
+                    "ordinal": ordinal,
+                }
+                for ordinal, gene in enumerate(ridge.input_genes)
+            )
+
+        metric = change_prediction_metrics(
+            prediction,
+            observed,
+            selected,
+            minimum_shared_genes=settings.minimum_shared_genes,
+        )
+        metrics.append(base | metric | {"status": status})
+        predictions.append(
+            pd.DataFrame(
+                base
+                | {
+                    "gene_id": selected,
+                    "baseline_expression": baseline_test.iloc[0].to_numpy(),
+                    "observed_expression": target.loc[
+                        [heldout], selected.tolist()
+                    ]
+                    .iloc[0]
+                    .to_numpy(),
+                    "predicted_expression": baseline_test.iloc[0].to_numpy()
+                    + prediction,
+                    "observed_delta": observed,
+                    "predicted_delta": prediction,
+                    "status": status,
+                }
+            )
+        )
+    return predictions, metrics, genes, fits
+
+
+def _training_genes(
+    baseline: pd.DataFrame,
+    target: pd.DataFrame,
+    *,
+    settings: BenchmarkSettings,
+) -> pd.Index:
+    """Select genes reaching the CPM threshold in enough training donors.
+
+    A gene qualifies for a donor when it reaches `minimum_gene_cpm` at
+    baseline or after weightloss. Only training donors are supplied.
+    """
+    present = (
+        np.expm1(baseline) * 1_000_000 / settings.normalization_target
+        >= settings.minimum_gene_cpm
+    ) | (
+        np.expm1(target) * 1_000_000 / settings.normalization_target
+        >= settings.minimum_gene_cpm
+    )
+    return baseline.columns[present.sum(axis=0) >= settings.minimum_gene_donors]
+
+
+def _predict_change(
+    model: str,
+    baseline_train: pd.DataFrame,
+    changes: pd.DataFrame,
+    baseline_test: pd.DataFrame,
+    *,
+    settings: BenchmarkSettings,
+) -> tuple[np.ndarray, str, AdiposeRidge | None]:
+    """Predict the held-out paired change, or say why it is non-estimable.
+
+    Returns:
+      Predicted change per selected gene (missing when non-estimable), the
+      estimability status, and the fitted ridge when one was used.
+    """
+    missing = np.full(baseline_test.shape[1], np.nan)
+    n_training = len(baseline_train)
+    if baseline_test.shape[1] < settings.minimum_shared_genes:
+        return missing, "insufficient_shared_genes", None
+    if model == "adipose-no-change":
+        return np.zeros(baseline_test.shape[1]), "ok", None
+    if model == "adipose-mean-shift":
+        if n_training < settings.mean_shift_minimum_donors:
+            return missing, "insufficient_training_donors", None
+        mean_shift = fit_adipose_mean_shift(
+            changes, minimum_donors=settings.mean_shift_minimum_donors
+        )
+        prediction = predict_adipose_mean_shift(mean_shift, baseline_test)
+        return prediction.iloc[0].to_numpy(), "ok", None
+    if model != "adipose-ridge":
+        raise ValueError(f"Unknown transition model: {model!r}")
+    if n_training < settings.ridge_minimum_donors:
+        return missing, "insufficient_training_donors", None
+    if not (baseline_train.var(axis=0, ddof=0) > 0).any():
+        return missing, "no_variable_input_features", None
+    ridge = fit_adipose_ridge(
+        baseline_train,
+        changes,
+        minimum_donors=settings.ridge_minimum_donors,
+        maximum_input_genes=settings.ridge_maximum_genes,
+        n_components=settings.ridge_components,
+        alpha=settings.ridge_alpha,
+        random_seed=settings.random_seed,
+    )
+    prediction = predict_adipose_ridge(ridge, baseline_test)
+    return prediction.iloc[0].to_numpy(), "ok", ridge

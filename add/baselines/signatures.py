@@ -11,6 +11,32 @@ import scipy.sparse as sp  # type: ignore[import]
 from add.perturb import PerturbSignatures
 
 
+def select_signature_genes(
+    signatures: PerturbSignatures,
+    genes: Sequence[str],
+) -> PerturbSignatures:
+    """Return every signature restricted to `genes`, in that order.
+
+    Rows and metadata are unchanged. Matched controls are subset to the same
+    genes, so scores computed from the result share one gene support.
+    """
+    positions = _gene_positions(signatures.genes, genes)
+    control = (
+        None if signatures.control is None else signatures.control[:, positions]
+    )
+    return PerturbSignatures(
+        delta=signatures.delta[:, positions],
+        genes=[str(gene) for gene in genes],
+        meta=signatures.meta,
+        control=control,
+        provenance={
+            **dict(signatures.provenance),
+            "gene_selection": "explicit_subset",
+            "n_selected_genes": len(positions),
+        },
+    )
+
+
 def _average_signature_groups(
     signatures: PerturbSignatures,
     *,
@@ -24,6 +50,7 @@ def _average_signature_groups(
         raise KeyError(
             f"Perturbation metadata lacks grouping columns: {missing}"
         )
+
     delta = _dense_matrix(signatures.delta)
     _require_finite(delta, name="perturbation deltas")
 
@@ -40,6 +67,7 @@ def _average_signature_groups(
         key_tuple = keys if isinstance(keys, tuple) else (keys,)
         group_positions = np.asarray(positions, dtype=int)
         output_delta.append(np.mean(delta[group_positions], axis=0))
+
         group_meta = signatures.meta.iloc[group_positions]
         record: dict[str, object] = dict(
             zip(group_cols, key_tuple, strict=True)
@@ -86,16 +114,19 @@ def _average_drug_contexts(
         sort=True,
         dropna=False,
     )
+
     for drug, positions in grouped.indices.items():
         group_positions = np.asarray(positions, dtype=int)
         group_meta = context_signatures.meta.iloc[group_positions]
         output_delta.append(np.mean(delta[group_positions], axis=0))
+
         record: dict[str, object] = {
             drug_col: drug,
             "n_external_contexts": int(
                 group_meta.loc[:, list(context_cols)].drop_duplicates().shape[0]
             ),
         }
+
         for column in group_meta.columns:
             if column in {
                 drug_col,

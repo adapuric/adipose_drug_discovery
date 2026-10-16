@@ -71,3 +71,6 @@ pca_ridge:
   n_components: 30
   ridge_alpha: 10.0
   test_fraction: 0.2
+  bootstrap_draws: 2000
+  confidence_level: 0.95
+  comparison_top_n: 20
