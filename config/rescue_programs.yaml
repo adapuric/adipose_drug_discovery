@@ -1,0 +1,68 @@
+schema_version: 1
+# MSigDB Hallmark gene sets, human symbols. Download once:
+#   curl -fL <gene_sets_source> -o data/gene_sets/h.all.v2024.1.Hs.symbols.gmt
+gene_sets_path: data/gene_sets/h.all.v2024.1.Hs.symbols.gmt
+gene_sets_source: https://data.broadinstitute.org/gsea-msigdb/msigdb/release/2024.1.Hs/h.all.v2024.1.Hs.symbols.gmt
+rescue_path: results/rescue/rescue_vectors.csv.gz
+pseudobulk_path: results/pseudobulk/adipose_pseudobulk.h5ad
+# study_signatures.parquet from the adipose panel report, or null.
+panel_signatures_path: null
+output_path: results/rescue_programs
+
+# Programs are fixed unions of Hallmark sets chosen before looking at drug
+# scores. The excluded program is dropped for the "without_<program>" score.
+programs:
+  stress:
+    - HALLMARK_TNFA_SIGNALING_VIA_NFKB
+  metabolic:
+    - HALLMARK_ADIPOGENESIS
+    - HALLMARK_FATTY_ACID_METABOLISM
+    - HALLMARK_CHOLESTEROL_HOMEOSTASIS
+    - HALLMARK_OXIDATIVE_PHOSPHORYLATION
+  proliferation:
+    - HALLMARK_E2F_TARGETS
+    - HALLMARK_G2M_CHECKPOINT
+excluded_program: stress
+
+display_state: AD_ALL
+top_drugs: 15
+minimum_shared_genes: 10
+minimum_program_genes: 5
+
+donors:
+  donor_col: Donor
+  condition_col: condition
+  group_col: study
+  covariate_cols:
+    - BMI
+  baseline_label: baseline
+  weightloss_label: weightloss
+  condition_order:
+    - baseline
+    - weightloss
+    - Lean
+
+signatures:
+  lincs:
+    prefix: results/perturb/lincs_signatures
+    drug_col: pert_iname
+    context_cols:
+      - cell_id
+      - pert_idose
+      - pert_itime
+  tahoe:
+    prefix: results/perturb/tahoe_signatures
+    drug_col: drug
+    context_cols:
+      - cell_line
+      - plate
+
+positive_controls:
+  - source: lincs
+    drug: rosiglitazone
+  - source: tahoe
+    drug: Rosiglitazone
+  - source: panel:GSE71293
+    drug: rosiglitazone
+  - source: panel:GSE71293
+    drug: GW7647

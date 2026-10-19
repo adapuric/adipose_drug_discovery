@@ -7,14 +7,17 @@
 #PBS -o /rds/general/user/sho3/projects/lms-scott-raw/live/steve/add/job_out
 
 # Run one CPU-only baseline report: the donor-held-out surgery transition
-# benchmark, the human adipose compound panel, or the PerturbGen report with
-# naive edit baselines.
+# benchmark, the human adipose compound panel, the PerturbGen report with
+# naive edit baselines, or the rescue-program decomposition.
 #
 # Submit after prepare_rescue.pbs succeeds; REPORT is required:
 #   qsub -v REPORT=transition run_scripts/baselines/run_report.pbs
 #   qsub -v REPORT=panel,CONFIG_PATH=/abs/adipose_validation.yaml \
 #     run_scripts/baselines/run_report.pbs
 #   qsub -v REPORT=perturbgen,CONFIG_PATH=/abs/perturbgen_visualization.yaml \
+#     run_scripts/baselines/run_report.pbs
+#   qsub -l select=1:ncpus=4:mem=256gb \
+#     -v REPORT=programs,CONFIG_PATH=/abs/rescue_programs.yaml \
 #     run_scripts/baselines/run_report.pbs
 #
 # DRY_RUN=1 validates inputs without writing. Each job writes to a fresh
@@ -103,8 +106,12 @@ main() {
       config_path="${config_path:-${REPO_DIR}/config/perturbgen_visualization.yaml}"
       command=(python -u -m run_scripts.perturbgen.plot_perturbation)
       ;;
+    programs)
+      config_path="${config_path:-${REPO_DIR}/config/rescue_programs.yaml}"
+      command=(python -u -m run_scripts.baselines.decompose_rescue_programs)
+      ;;
     *)
-      printf 'ERROR: submit with REPORT=transition, panel, or perturbgen; got %s\n' \
+      printf 'ERROR: submit with REPORT=transition, panel, perturbgen, or programs; got %s\n' \
         "${REPORT:-nothing}" >&2
       return 2
       ;;

@@ -32,6 +32,7 @@ def plot_top_rankings(
     top_n: int = 15,
     score_col: str = "score",
     reference_col: str | None = None,
+    reference_label: str = "Train-mean reference (drug-agnostic)",
     figsize: tuple[float, float] | None = None,
     width: float = 1.4,
     row_height: float = 0.105,
@@ -51,6 +52,7 @@ def plot_top_rankings(
       score_col: Score column plotted on the x axis.
       reference_col: Column holding one reference score per state, on the
         scale of `score_col`; None draws no reference.
+      reference_label: Legend text naming the reference.
       figsize: Overall inches; overrides `width` and `row_height`.
       width: Inches of the data area when `figsize` is None.
       row_height: Inches per drug row when `figsize` is None.
@@ -125,7 +127,7 @@ def plot_top_rankings(
                         color=reference_color,
                         linestyle="--",
                         linewidth=0.5,
-                        label="Train-mean reference (drug-agnostic)",
+                        label=reference_label,
                     )
                 ],
                 loc="outside lower center",
@@ -162,12 +164,14 @@ def plot_drug_state_scores(
 ) -> tuple[Figure, Axes]:
     """Plot a drug-by-state score matrix with context support as dot area.
 
-    Rows are the `top_drugs` drugs with the highest score in any state, in
-    that order. Colour is the score on a diverging scale centred on zero and
-    limited by the `color_quantile` of absolute displayed scores; the colour
-    bar is extended when values are clipped, and `rankings` keeps them. Dot
-    area is proportional to the drug's external contexts. Unscored
-    drug-state cells are grey crosses, never zero.
+    Rows are the `top_drugs` drugs with the highest median score across the
+    states they are scored in, in that order, so one sparsely supported or
+    shifted state cannot pick the rows. Colour is the score on a diverging
+    scale centred on zero and limited by the `color_quantile` of absolute
+    displayed scores; the colour bar is extended when values are clipped,
+    and `rankings` keeps them. Dot area is proportional to the drug's
+    external contexts. Unscored drug-state cells are grey crosses, never
+    zero.
 
     Args:
       rankings: Drug rows with a state column, `score_col` and optionally
@@ -201,7 +205,7 @@ def plot_drug_state_scores(
         raise ValueError("rankings contains no finite scores")
     selected_drugs = (
         finite.groupby("_drug_label", sort=False)[score_col]
-        .max()
+        .median()
         .nlargest(top_drugs)
         .index.tolist()
     )
@@ -255,7 +259,8 @@ def plot_drug_state_scores(
         colorbar.set_label(_score_label(score_col))
         _support_legend(figure, support_matrix, max_dot_size=max_dot_size)
         figure.suptitle(
-            f"Top {len(selected_drugs)} drugs across adipocyte states",
+            f"Top {len(selected_drugs)} drugs by median score across "
+            "adipocyte states",
             x=0.01,
             ha="left",
             fontsize=plt.rcParams["axes.titlesize"],

@@ -17,6 +17,7 @@ parameters:
   minimum_gene_donors: 2
   minimum_shared_genes: 50
   mean_shift_minimum_donors: 2
+  target_mean_minimum_donors: 2
   ridge_minimum_donors: 3
   ridge_maximum_genes: 2000
   ridge_components: 5

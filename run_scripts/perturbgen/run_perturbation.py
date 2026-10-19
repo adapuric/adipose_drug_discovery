@@ -1,4 +1,4 @@
-"""Run and summarize donor-aware PerturbGen perturbation inference."""
+"""Run PerturbGen perturbation inference with optional donor-aware summaries."""
 
 from __future__ import annotations
 
@@ -343,7 +343,7 @@ def _parse_arguments() -> argparse.Namespace:
 
 
 def main() -> None:
-    """Run configured perturbations and write donor-aware summaries."""
+    """Run perturbations and optionally write donor-aware summaries."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(levelname)s %(name)s: %(message)s",
@@ -360,10 +360,12 @@ def main() -> None:
     )
     genes = resolve_genes(config, overrides=arguments.gene)
     prepare = config.prepare
-    if prepare is None:
+    if config.perturbation.summarize and prepare is None:
         raise ValueError(
             "Perturbation summaries group by prepare.donor_col and "
-            "prepare.state_alias_col; this config has no prepare section."
+            "prepare.state_alias_col; this config has no prepare section. "
+            "Set perturbation.summarize: false to run inference without "
+            "donor/state summaries."
         )
     if not arguments.dry_run:
         validate_runtime_inputs(
@@ -398,14 +400,19 @@ def main() -> None:
 
         result_path = find_perturbation_result(config, gene=gene)
         logger.info("PerturbGen result: %s", result_path)
-        summary_paths = summarize_perturbation_result(
-            result_path,
-            output_directory=output_directory / "summary",
-            donor_col=prepare.donor_col,
-            state_col=prepare.state_alias_col,
-        )
-        for name, path in summary_paths.items():
-            logger.info("%s: %s", name, path)
+        if config.perturbation.summarize and prepare is not None:
+            summary_paths = summarize_perturbation_result(
+                result_path,
+                output_directory=output_directory / "summary",
+                donor_col=prepare.donor_col,
+                state_col=prepare.state_alias_col,
+            )
+            for name, path in summary_paths.items():
+                logger.info("%s: %s", name, path)
+        else:
+            logger.info(
+                "Skipping donor/state summaries (perturbation.summarize=false)."
+            )
 
 
 if __name__ == "__main__":

@@ -166,6 +166,7 @@ class PerturbationConfig:
     data_loader_workers: int
     precision: int
     context_mode: bool
+    summarize: bool = True
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)

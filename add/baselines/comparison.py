@@ -18,7 +18,7 @@ def add_train_mean_reference(
     rankings: pd.DataFrame,
     reference: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Attach each state's train-mean score from the same gene support.
+    """Attach each state's drug-agnostic reference score from the same genes.
 
     `score_minus_train_mean` is positive when a drug mimics the rescue more
     than the drug-agnostic mean response. It is missing when either score is
@@ -26,8 +26,10 @@ def add_train_mean_reference(
 
     Args:
       rankings: Drug rows with `state`, `score` and `score_status`.
-      reference: One train-mean row per state, as from `score_train_mean`,
-        scored on the same signatures and genes as `rankings`.
+      reference: One row per state from the same baseline without drug
+        identity, scored on the same genes as `rankings`: `score_train_mean`
+        for measured signatures, `score_pca_ridge_reference` for PCA-ridge
+        predictions.
 
     Returns:
       A copy of `rankings` with `train_mean_score` and

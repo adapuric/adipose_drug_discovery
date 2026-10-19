@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from dataclasses import dataclass
 from dataclasses import fields
@@ -14,16 +14,20 @@ import anndata as ad
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
+from matplotlib import pyplot as plt
 
 from add.baselines.adipose import AdiposeRidge
 from add.baselines.adipose import fit_adipose_mean_shift
 from add.baselines.adipose import fit_adipose_ridge
+from add.baselines.adipose import fit_adipose_target_mean
 from add.baselines.adipose import predict_adipose_mean_shift
 from add.baselines.adipose import predict_adipose_ridge
+from add.baselines.adipose import predict_adipose_target_mean
 from add.scoring import score_mimicry
 from add.validation.artifacts import input_identity
 from add.validation.artifacts import prepare_report_directory
 from add.validation.artifacts import publish_report
+from add.visualization.perturbation import plot_transition_errors
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -47,6 +51,7 @@ class BenchmarkSettings:
     minimum_gene_donors: int = 2
     minimum_shared_genes: int = 50
     mean_shift_minimum_donors: int = 2
+    target_mean_minimum_donors: int = 2
     ridge_minimum_donors: int = 3
     ridge_maximum_genes: int = 2000
     ridge_components: int = 5
@@ -86,6 +91,7 @@ class BenchmarkSettings:
         if (
             self.minimum_shared_genes < 2
             or self.mean_shift_minimum_donors < 2
+            or self.target_mean_minimum_donors < 2
             or self.ridge_minimum_donors < 3
         ):
             raise ValueError("insufficient minimum support thresholds")
@@ -252,7 +258,7 @@ def evaluate_adipose_transition(
     *,
     settings: BenchmarkSettings | None = None,
 ) -> dict[str, pd.DataFrame]:
-    """Evaluate three transition baselines with training-only gene selection."""
+    """Evaluate the transition baselines with training-only gene selection."""
     resolved = settings or BenchmarkSettings()
     baseline, target, exclusions = paired_donor_profiles(
         pseudobulk, settings=resolved
@@ -299,12 +305,22 @@ def evaluate_adipose_transition(
             comparisons,
             value_columns=("rmse_improvement", "mae_improvement"),
             group_columns=("model", "comparator", "state"),
+            status_columns={
+                "rmse_improvement": "comparison_status",
+                "mae_improvement": "comparison_status",
+            },
             random_seed=resolved.random_seed,
             bootstrap_draws=resolved.bootstrap_draws,
             confidence_level=resolved.confidence_level,
         ),
         "summary.csv": donor_metric_summary(
             metric_table,
+            status_columns={
+                "delta_rmse": "error_status",
+                "delta_mae": "error_status",
+                "delta_pearson": "correlation_status",
+                "delta_spearman": "correlation_status",
+            },
             random_seed=resolved.random_seed,
             bootstrap_draws=resolved.bootstrap_draws,
             confidence_level=resolved.confidence_level,
@@ -349,18 +365,32 @@ def change_prediction_metrics(
     }
 
 
-def paired_model_comparisons(metrics: pd.DataFrame) -> pd.DataFrame:
-    """Compute improvements only on matched donor/state/fold/gene support."""
+def paired_model_comparisons(
+    metrics: pd.DataFrame,
+    *,
+    references: Sequence[str] = (
+        "adipose-no-change",
+        "adipose-mean-shift",
+        "adipose-target-mean",
+    ),
+) -> pd.DataFrame:
+    """Compute improvements only on matched donor/state/fold/gene support.
+
+    Each model is compared with every reference, in order, except references
+    listed at or before it, so no pair is reported in both directions.
+    Positive improvements favour `model` over `comparator`.
+    `comparison_status` names the first non-estimable side, model first.
+    """
     keys = ["task", "fold_id", "donor_id", "state", "n_genes", "scale"]
     rows: list[pd.DataFrame] = []
-    for reference in ("adipose-no-change", "adipose-mean-shift"):
-        comparison = metrics.merge(
+    for position, reference in enumerate(references):
+        simpler = list(references[: position + 1])
+        comparison = metrics.loc[~metrics["model"].isin(simpler)].merge(
             metrics.loc[metrics["model"].eq(reference)],
             on=keys,
             suffixes=("", "_reference"),
             validate="many_to_one",
         )
-        comparison = comparison.loc[~comparison["model"].eq(reference)]
         comparison["comparator"] = reference
         comparison["rmse_improvement"] = (
             comparison["delta_rmse_reference"] - comparison["delta_rmse"]
@@ -368,11 +398,9 @@ def paired_model_comparisons(metrics: pd.DataFrame) -> pd.DataFrame:
         comparison["mae_improvement"] = (
             comparison["delta_mae_reference"] - comparison["delta_mae"]
         )
-        comparison["comparison_status"] = np.where(
-            comparison["status"].eq("ok")
-            & comparison["status_reference"].eq("ok"),
-            "ok",
-            "non_estimable_model",
+        comparison["comparison_status"] = comparison["status"].where(
+            comparison["status"].ne("ok"),
+            comparison["status_reference"],
         )
         rows.append(
             comparison[
@@ -402,9 +430,16 @@ def donor_metric_summary(
         "delta_spearman",
     ),
     group_columns: tuple[str, ...] = ("model", "state"),
+    status_columns: Mapping[str, str] | None = None,
 ) -> pd.DataFrame:
     """Summarize fixed predictions using shared donor-cluster bootstrap
     draws.
+
+    When no donor has a finite value, `interval_status` reports why: the
+    distinct non-"ok" donor statuses from the metric's column in
+    `status_columns` (for example "constant_candidate"), joined by ";".
+    Otherwise, and for metrics without a status column, it describes the
+    interval itself.
     """
     if bootstrap_draws < 1 or not 0 < confidence_level < 1:
         raise ValueError("Invalid bootstrap draws or confidence level")
@@ -444,6 +479,12 @@ def donor_metric_summary(
             )
             lower = upper = np.nan
             interval_status = "insufficient_donors_for_interval"
+            status_column = (status_columns or {}).get(column)
+            if not usable.any() and status_column in group:
+                reasons = group[status_column].astype(str)
+                reasons = reasons.loc[reasons.ne("ok")].unique()
+                if len(reasons):
+                    interval_status = ";".join(sorted(reasons))
             if usable.sum() >= 3:
                 interval_status = "degenerate_donor_values"
                 if np.ptp(values[usable]) > 0:
@@ -476,10 +517,22 @@ def write_adipose_benchmark(
 ) -> Path:
     """Read donor pseudobulk, evaluate all folds, and publish report
     artifacts.
+
+    `transition_model_comparison.pdf` (with a PNG) shows every held-out
+    donor's error under each model, drawn from `metrics.csv`.
     """
     pseudobulk = ad.read_h5ad(input_path)
     tables = evaluate_adipose_transition(pseudobulk, settings=settings)
     destination = prepare_report_directory(output_dir)
+
+    figure, _ = plot_transition_errors(tables["metrics.csv"])
+    path = destination / "transition_model_comparison.pdf"
+    figure.savefig(path, bbox_inches="tight", pad_inches=0.02)
+    figure.savefig(
+        path.with_suffix(".png"), dpi=450, bbox_inches="tight", pad_inches=0.02
+    )
+    plt.close(figure)
+
     publish_report(
         destination,
         tables=tables,
@@ -538,7 +591,8 @@ def _evaluate_heldout_state(
         for ordinal, gene in enumerate(selected)
     ]
     baseline_train = baseline.reindex(index=training, columns=selected)
-    changes = target.reindex(index=training, columns=selected) - baseline_train
+    target_train = target.reindex(index=training, columns=selected)
+    changes = target_train - baseline_train
     baseline_test = baseline.reindex(index=[heldout], columns=selected)
     observed = (
         target.loc[[heldout], selected].iloc[0]
@@ -548,7 +602,12 @@ def _evaluate_heldout_state(
     predictions: list[pd.DataFrame] = []
     metrics: list[dict[str, object]] = []
     fits: list[dict[str, object]] = []
-    for model in ("adipose-no-change", "adipose-mean-shift", "adipose-ridge"):
+    for model in (
+        "adipose-no-change",
+        "adipose-mean-shift",
+        "adipose-target-mean",
+        "adipose-ridge",
+    ):
         base = {
             "task": "surgery_transition",
             "model": model,
@@ -565,7 +624,12 @@ def _evaluate_heldout_state(
             ),
         }
         prediction, status, ridge = _predict_change(
-            model, baseline_train, changes, baseline_test, settings=settings
+            model,
+            baseline_train,
+            target_train,
+            changes,
+            baseline_test,
+            settings=settings,
         )
         if ridge is not None:
             fits.append(
@@ -639,12 +703,17 @@ def _training_genes(
 def _predict_change(
     model: str,
     baseline_train: pd.DataFrame,
+    target_train: pd.DataFrame,
     changes: pd.DataFrame,
     baseline_test: pd.DataFrame,
     *,
     settings: BenchmarkSettings,
 ) -> tuple[np.ndarray, str, AdiposeRidge | None]:
     """Predict the held-out paired change, or say why it is non-estimable.
+
+    Only training-donor profiles fit a model; the held-out baseline is used
+    as model input, and the target mean subtracts it to express its
+    prediction as a change.
 
     Returns:
       Predicted change per selected gene (missing when non-estimable), the
@@ -663,6 +732,14 @@ def _predict_change(
             changes, minimum_donors=settings.mean_shift_minimum_donors
         )
         prediction = predict_adipose_mean_shift(mean_shift, baseline_test)
+        return prediction.iloc[0].to_numpy(), "ok", None
+    if model == "adipose-target-mean":
+        if n_training < settings.target_mean_minimum_donors:
+            return missing, "insufficient_training_donors", None
+        target_mean = fit_adipose_target_mean(
+            target_train, minimum_donors=settings.target_mean_minimum_donors
+        )
+        prediction = predict_adipose_target_mean(target_mean, baseline_test)
         return prediction.iloc[0].to_numpy(), "ok", None
     if model != "adipose-ridge":
         raise ValueError(f"Unknown transition model: {model!r}")

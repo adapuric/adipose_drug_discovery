@@ -20,6 +20,14 @@ class AdiposeMeanShift:
 
 
 @dataclass(frozen=True)
+class AdiposeTargetMean:
+    """Equal-donor weightloss profile learned on a named gene universe."""
+
+    target: pd.Series
+    training_donors: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class AdiposeRidge:
     """Training-only scaling, low-rank baseline features, and change
     regression.
@@ -60,6 +68,37 @@ def predict_adipose_mean_shift(
         index=selected.index,
         columns=selected.columns,
     )
+
+
+def fit_adipose_target_mean(
+    targets: pd.DataFrame,
+    *,
+    minimum_donors: int = 2,
+) -> AdiposeTargetMean:
+    """Fit the average weightloss profile with one equal row per donor."""
+    _validate_profiles(targets)
+    if minimum_donors < 2 or len(targets) < minimum_donors:
+        raise ValueError("insufficient_training_donors for target mean")
+    return AdiposeTargetMean(
+        target=targets.mean(axis=0),
+        training_donors=tuple(targets.index.astype(str)),
+    )
+
+
+def predict_adipose_target_mean(
+    model: AdiposeTargetMean,
+    baseline: pd.DataFrame,
+) -> pd.DataFrame:
+    """Return the change that moves each baseline to the training target.
+
+    The prediction ignores the held-out donor's own deviation at follow-up:
+    any donor-specific baseline deviation is predicted to vanish. It is the
+    reference a model must beat to show donor-specific signal that persists
+    between visits, not just reversion to the training average.
+    """
+    _validate_profiles(baseline)
+    selected = baseline.loc[:, model.target.index]
+    return selected.rsub(model.target, axis="columns")
 
 
 def fit_adipose_ridge(

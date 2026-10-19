@@ -5,17 +5,20 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+import anndata as ad
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.figure import Figure
 
+from add.baselines import mean_drug_signatures
 from add.baselines.edits import coexpression_edit_effects
 from add.baselines.edits import edit_effect_agreement
 from add.baselines.edits import generic_edit_effects
+from add.data import file_identity
 from add.data import load_rescue_table
 from add.perturb import PerturbSignatures
 from add.perturb import load_perturb_signatures
@@ -35,12 +38,24 @@ from add.validation.perturbgen_results import classify_perturbgen_run
 from add.validation.perturbgen_results import evaluate_transition_export
 from add.validation.perturbgen_results import read_legacy_edit_effects
 from add.validation.perturbgen_results import read_native_edit_effects
+from add.validation.rescue_programs import decompose_program_mimicry
+from add.validation.rescue_programs import donor_program_scores
+from add.validation.rescue_programs import paired_program_changes
+from add.validation.rescue_programs import program_change_correlations
+from add.validation.rescue_programs import program_genes
+from add.validation.rescue_programs import program_ranking_agreement
+from add.validation.rescue_programs import read_gene_sets
+from add.validation.rescue_programs import summarize_program_changes
+from add.validation.rescue_programs import summarize_rescue_programs
 from add.visualization.perturbation import plot_donor_edit_effects
 from add.visualization.perturbation import plot_downstream_magnitude
 from add.visualization.perturbation import plot_edit_effect_heatmap
 from add.visualization.perturbation import plot_support_qc
 from add.visualization.perturbation import plot_transition_delta_scatter
 from add.visualization.perturbation import plot_transition_errors
+from add.visualization.programs import plot_donor_program_scores
+from add.visualization.programs import plot_program_matrix
+from add.visualization.programs import plot_score_contributions
 from add.visualization.style import set_matplotlib_publication_parameters
 
 
@@ -57,6 +72,40 @@ class _NaiveBaselineSettings:
     minimum_shared_genes: int
     minimum_reference_edits: int
     chunk_size: int
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class _SignatureSource:
+    """A cached external signature source and how its rows form drugs."""
+
+    prefix: Path
+    drug_col: str
+    context_cols: tuple[str, ...]
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class _RescueProgramSettings:
+    """Validated inputs and options for the rescue-program report."""
+
+    gene_sets_path: Path
+    rescue_path: Path
+    pseudobulk_path: Path
+    panel_signatures_path: Path | None
+    programs: dict[str, tuple[str, ...]]
+    excluded_program: str
+    display_state: str
+    top_drugs: int
+    minimum_shared_genes: int
+    minimum_program_genes: int
+    donor_col: str
+    condition_col: str
+    group_col: str | None
+    covariate_cols: tuple[str, ...]
+    baseline_label: str
+    weightloss_label: str
+    condition_order: tuple[str, ...]
+    sources: dict[str, _SignatureSource]
+    positive_controls: tuple[tuple[str, str], ...]
 
 
 def validate_adipose_panel(
@@ -332,6 +381,142 @@ def perturbgen_report(
     return destination
 
 
+def decompose_rescue_programs(
+    config_path: Path,
+    *,
+    output_dir: Path | None = None,
+    dry_run: bool = False,
+) -> Path:
+    """Split the rescue signature into gene-set programs and score drugs.
+
+    Publishes how every gene set moves in each state's rescue vector,
+    donor-level program scores and their paired changes, drug-level
+    decompositions of rescue mimicry for each configured signature source
+    and the configured positive controls. Program membership comes from the
+    gene-set file, never from this data. Descriptive and hypothesis-
+    generating: it cannot tell sampling effects from biology on its own.
+    """
+    config, root = read_report_config(
+        config_path,
+        allowed_keys=(
+            "gene_sets_path",
+            "gene_sets_source",
+            "rescue_path",
+            "pseudobulk_path",
+            "panel_signatures_path",
+            "output_path",
+            "programs",
+            "excluded_program",
+            "display_state",
+            "top_drugs",
+            "minimum_shared_genes",
+            "minimum_program_genes",
+            "donors",
+            "signatures",
+            "positive_controls",
+        ),
+    )
+    settings = _rescue_program_settings(config, root=root)
+    gene_sets = read_gene_sets(settings.gene_sets_path)
+    programs = program_genes(gene_sets, settings.programs)
+    rescue_table = load_rescue_table(settings.rescue_path)
+    rescue_vectors = {
+        state: rescue_vector(rescue_table, state=state)
+        for state in sorted(rescue_table["state"].astype(str).unique())
+    }
+    if settings.display_state not in rescue_vectors:
+        raise ValueError(
+            f"display_state {settings.display_state!r} has no rescue vector"
+        )
+    destination = output_dir or configured_path(
+        config, "output_path", root=root
+    )
+    if dry_run:
+        logger.info(
+            "Rescue programs validated: %s; states %s; sources %s; "
+            "destination %s",
+            {name: len(genes) for name, genes in programs.items()},
+            sorted(rescue_vectors),
+            sorted(settings.sources),
+            destination,
+        )
+        return destination
+
+    tables = _donor_program_tables(settings, programs)
+    tables["hallmark_rescue_summary.csv"] = summarize_rescue_programs(
+        rescue_table,
+        gene_sets,
+        minimum_genes=settings.minimum_program_genes,
+    )
+    tables["program_genes.csv"] = pd.DataFrame(
+        [
+            {"program": program, "gene": gene}
+            for program, genes in programs.items()
+            for gene in sorted(genes)
+        ]
+    )
+    decomposition, source_inputs = _drug_program_decompositions(
+        settings, programs, rescue_vectors
+    )
+    tables["drug_program_decomposition.parquet"] = decomposition
+    scores = _wide_program_scores(decomposition)
+    tables["drug_program_scores.csv"] = scores
+    tables["program_ranking_agreement.csv"] = pd.concat(
+        [
+            program_ranking_agreement(
+                decomposition.loc[decomposition["source"].eq(source)],
+                top_n=settings.top_drugs,
+            ).assign(source=source)
+            for source in settings.sources
+        ],
+        ignore_index=True,
+    )
+    tables["positive_controls.csv"] = _positive_control_scores(
+        scores, controls=settings.positive_controls
+    )
+
+    destination = prepare_report_directory(destination)
+    _rescue_program_figures(
+        destination,
+        tables=tables,
+        settings=settings,
+        programs=programs,
+    )
+    publish_report(
+        destination,
+        tables=tables,
+        provenance={
+            "task": "rescue_program_decomposition",
+            "inputs": {
+                "config": input_identity(config_path),
+                "gene_sets": input_identity(settings.gene_sets_path)
+                | {"source_url": config.get("gene_sets_source")},
+                "rescue": input_identity(settings.rescue_path),
+                "pseudobulk": input_identity(settings.pseudobulk_path),
+                "panel_signatures": input_identity(
+                    settings.panel_signatures_path
+                )
+                if settings.panel_signatures_path is not None
+                else None,
+                "signatures": source_inputs,
+            },
+            "parameters": dataclasses.asdict(settings)
+            | {
+                "program_sizes": {
+                    name: len(genes) for name, genes in programs.items()
+                },
+                "drug_signature": "equal_context_mean_by_drug",
+            },
+            "interpretation": (
+                "descriptive program decomposition; curated gene sets; "
+                "cannot separate sampling effects from biology without "
+                "sample-collection metadata"
+            ),
+        },
+    )
+    return destination
+
+
 def _read_perturbgen_runs(
     runs: list[object],
     *,
@@ -546,6 +731,10 @@ def _naive_edit_baselines(
         agreement,
         value_columns=("agreement_pearson", "agreement_spearman"),
         group_columns=("run_id", "comparator", "scale", "edit_id", "state"),
+        status_columns={
+            "agreement_pearson": "status",
+            "agreement_spearman": "status",
+        },
         random_seed=_integer(config, "random_seed", 42, minimum=0),
         bootstrap_draws=_integer(config, "bootstrap_draws", 2000),
         confidence_level=_number(config, "confidence_level", 0.95),
@@ -645,6 +834,10 @@ def _transition_figures(
             tables["paired_model_comparisons.csv"],
             value_columns=("rmse_improvement", "mae_improvement"),
             group_columns=("model", "comparator", "state"),
+            status_columns={
+                "rmse_improvement": "comparison_status",
+                "mae_improvement": "comparison_status",
+            },
             random_seed=_integer(config, "random_seed", 42, minimum=0),
             bootstrap_draws=_integer(config, "bootstrap_draws", 2000),
             confidence_level=_number(config, "confidence_level", 0.95),
@@ -1047,6 +1240,363 @@ def _panel_figures(
         filename = f"panel_units_{number:02d}"
         selected.to_csv(destination / f"{filename}.csv", index=False)
         _save_figure(figure, destination / f"{filename}.pdf", png=False)
+
+
+def _rescue_program_settings(
+    config: Mapping[str, object],
+    *,
+    root: Path,
+) -> _RescueProgramSettings:
+    """Validate the rescue-program report options without loading data."""
+    programs = config.get("programs")
+    if not isinstance(programs, dict) or not programs:
+        raise ValueError("programs must map program names to gene-set lists")
+    program_sets = {str(name): _texts(programs, name) for name in programs}
+    excluded = _text(config, "excluded_program")
+    if excluded not in program_sets:
+        raise ValueError(
+            f"excluded_program {excluded!r} must name one of "
+            f"{sorted(program_sets)}"
+        )
+
+    donors = config.get("donors")
+    if not isinstance(donors, dict):
+        raise ValueError("donors must map the donor and condition settings")
+
+    signatures = config.get("signatures", {})
+    if not isinstance(signatures, dict):
+        raise ValueError("signatures must map source names to options")
+    sources: dict[str, _SignatureSource] = {}
+    for name, options in signatures.items():
+        if not isinstance(options, dict):
+            raise ValueError(f"Signature source {name!r} needs options")
+        prefix = configured_path(options, "prefix", root=root)
+        if not Path(f"{prefix}.npz").is_file():
+            raise FileNotFoundError(f"Signature cache not found: {prefix}.npz")
+        sources[str(name)] = _SignatureSource(
+            prefix=prefix,
+            drug_col=_text(options, "drug_col"),
+            context_cols=_texts(options, "context_cols"),
+        )
+
+    controls = config.get("positive_controls", [])
+    if not isinstance(controls, list) or not all(
+        isinstance(item, dict) for item in controls
+    ):
+        raise ValueError("positive_controls must list source and drug pairs")
+
+    panel_path = (
+        configured_path(config, "panel_signatures_path", root=root)
+        if config.get("panel_signatures_path") is not None
+        else None
+    )
+    return _RescueProgramSettings(
+        gene_sets_path=configured_path(config, "gene_sets_path", root=root),
+        rescue_path=configured_path(config, "rescue_path", root=root),
+        pseudobulk_path=configured_path(config, "pseudobulk_path", root=root),
+        panel_signatures_path=panel_path,
+        programs=program_sets,
+        excluded_program=excluded,
+        display_state=_text(config, "display_state", default="AD_ALL"),
+        top_drugs=_integer(config, "top_drugs", 15),
+        minimum_shared_genes=_integer(
+            config, "minimum_shared_genes", 10, minimum=3
+        ),
+        minimum_program_genes=_integer(config, "minimum_program_genes", 5),
+        donor_col=_text(donors, "donor_col"),
+        condition_col=_text(donors, "condition_col"),
+        group_col=_text(donors, "group_col")
+        if donors.get("group_col") is not None
+        else None,
+        covariate_cols=_texts(donors, "covariate_cols", default=()),
+        baseline_label=_text(donors, "baseline_label"),
+        weightloss_label=_text(donors, "weightloss_label"),
+        condition_order=_texts(donors, "condition_order"),
+        sources=sources,
+        positive_controls=tuple(
+            (_text(item, "source"), _text(item, "drug")) for item in controls
+        ),
+    )
+
+
+def _donor_program_tables(
+    settings: _RescueProgramSettings,
+    programs: Mapping[str, frozenset[str]],
+) -> dict[str, pd.DataFrame]:
+    """Score programs per donor and condition, then summarize paired changes.
+
+    Conditions outside the paired contrast, such as Lean, are scored for
+    reference only and never enter the paired changes.
+    """
+    group = [settings.group_col] if settings.group_col is not None else []
+    scores = donor_program_scores(
+        ad.read_h5ad(settings.pseudobulk_path),
+        programs,
+        donor_col=settings.donor_col,
+        condition_col=settings.condition_col,
+        carried_cols=[*group, *settings.covariate_cols],
+        minimum_genes=settings.minimum_program_genes,
+    )
+    changes = paired_program_changes(
+        scores,
+        baseline_label=settings.baseline_label,
+        weightloss_label=settings.weightloss_label,
+        covariate_cols=settings.covariate_cols,
+    )
+    return {
+        "donor_program_scores.csv": scores,
+        "donor_program_changes.csv": changes,
+        "program_change_summary.csv": summarize_program_changes(
+            changes, group_col=settings.group_col
+        ),
+        "program_change_correlations.csv": program_change_correlations(
+            changes, covariate_cols=settings.covariate_cols
+        ),
+    }
+
+
+def _drug_program_decompositions(
+    settings: _RescueProgramSettings,
+    programs: Mapping[str, frozenset[str]],
+    rescue_vectors: Mapping[str, pd.Series],
+) -> tuple[pd.DataFrame, dict[str, object]]:
+    """Decompose drug-level and panel signatures against every state.
+
+    Each external source is reduced to one equal-context mean signature per
+    drug, as in the mean-drug baseline, so contributions add up exactly.
+    Panel compounds use their study signature on genes with status "ok".
+
+    Returns:
+      The long decomposition with `source` and `drug`, and the identity of
+      every signature input.
+    """
+    frames: list[pd.DataFrame] = []
+    inputs: dict[str, object] = {}
+    for name, source in settings.sources.items():
+        signatures = load_perturb_signatures(source.prefix)
+        inputs[name] = {
+            "cache": file_identity(Path(f"{source.prefix}.npz")),
+            "provenance": signatures.provenance,
+        }
+        drug_means = mean_drug_signatures(
+            signatures,
+            drug_col=source.drug_col,
+            context_col=source.context_cols,
+        )
+        del signatures
+        frames.append(
+            decompose_program_mimicry(
+                drug_means,
+                rescue_vectors,
+                programs,
+                excluded_program=settings.excluded_program,
+                label_col=source.drug_col,
+                minimum_shared_genes=settings.minimum_shared_genes,
+            )
+            .rename(columns={source.drug_col: "drug"})
+            .assign(source=name)
+        )
+
+    if settings.panel_signatures_path is not None:
+        panel = pd.read_parquet(settings.panel_signatures_path)
+        for (study, compound), rows in panel.loc[
+            panel["status"].eq("ok")
+        ].groupby(["study_id", "compound"], sort=True):
+            signature = PerturbSignatures(
+                delta=rows["delta"].to_numpy(dtype=float)[np.newaxis, :],
+                genes=rows["gene_id"].astype(str).tolist(),
+                meta=pd.DataFrame(
+                    {"drug": [str(compound)]},
+                    index=pd.Index([f"panel_{study}_{compound}"]),
+                ),
+            )
+            frames.append(
+                decompose_program_mimicry(
+                    signature,
+                    rescue_vectors,
+                    programs,
+                    excluded_program=settings.excluded_program,
+                    minimum_shared_genes=settings.minimum_shared_genes,
+                ).assign(source=f"panel:{study}")
+            )
+    if not frames:
+        raise ValueError("Configure at least one signature source or panel")
+    return pd.concat(frames, ignore_index=True), inputs
+
+
+def _wide_program_scores(decomposition: pd.DataFrame) -> pd.DataFrame:
+    """Pivot the decomposition to one row per source, drug and state."""
+    keys = ["source", "drug", "state"]
+    named = decomposition.assign(
+        column=np.where(
+            decomposition["measure"].eq("full"),
+            "full",
+            decomposition["measure"] + "_" + decomposition["part"],
+        )
+    )
+    values = named.pivot(index=keys, columns="column", values="value")
+    support = (
+        named.loc[named["measure"].eq("full")]
+        .set_index(keys)[["status", "n_genes"]]
+        .rename(columns={"status": "full_status", "n_genes": "n_shared_genes"})
+    )
+    return support.join(values).reset_index()
+
+
+def _positive_control_scores(
+    scores: pd.DataFrame,
+    *,
+    controls: Sequence[tuple[str, str]],
+) -> pd.DataFrame:
+    """Return the scores of each configured control, flagging absent ones.
+
+    A control missing from its source is reported as "not_available", never
+    replaced by a similarly named compound.
+    """
+    frames: list[pd.DataFrame] = []
+    for source, drug in controls:
+        rows = scores.loc[scores["source"].eq(source) & scores["drug"].eq(drug)]
+        if rows.empty:
+            rows = pd.DataFrame(
+                {
+                    "source": [source],
+                    "drug": [drug],
+                    "full_status": ["not_available"],
+                }
+            )
+        frames.append(rows)
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def _rescue_program_figures(
+    destination: Path,
+    *,
+    tables: Mapping[str, pd.DataFrame],
+    settings: _RescueProgramSettings,
+    programs: Mapping[str, frozenset[str]],
+) -> None:
+    """Draw the Hallmark, donor, decomposition and control figures."""
+    state = settings.display_state
+    excluded = settings.excluded_program
+    summary = tables["hallmark_rescue_summary.csv"]
+    shifts = summary.pivot(
+        index="gene_set", columns="state", values="mean_t_shift"
+    )
+    shifts = shifts.loc[shifts[state].sort_values(na_position="last").index]
+    tags = {
+        name: [p for p, sets in settings.programs.items() if name in sets]
+        for name in shifts.index
+    }
+    shifts.index = [
+        name.removeprefix("HALLMARK_")
+        + (f" [{', '.join(tags[name])}]" if tags[name] else "")
+        for name in shifts.index
+    ]
+    figure, _ = plot_program_matrix(
+        shifts,
+        color_label="Mean rescue t, set minus other tested genes",
+        title=(
+            "Hallmark gene sets in the paired rescue vector "
+            f"(weight loss - baseline); rows by {state}"
+        ),
+    )
+    _save_figure(figure, destination / "hallmark_rescue_shift.pdf", png=True)
+
+    figure, _ = plot_donor_program_scores(
+        tables["donor_program_scores.csv"],
+        programs=list(programs),
+        condition_order=settings.condition_order,
+        group_col=settings.group_col,
+    )
+    _save_figure(figure, destination / "donor_program_scores.pdf", png=True)
+
+    scores = tables["drug_program_scores.csv"]
+    columns = {
+        "full": "full",
+        f"restricted_without_{excluded}": f"without {excluded}",
+        **{f"restricted_{program}": f"{program} only" for program in programs},
+    }
+    decomposition = tables["drug_program_decomposition.parquet"]
+    for source in settings.sources:
+        figure, _ = plot_score_contributions(
+            decomposition.loc[decomposition["source"].eq(source)],
+            state=state,
+            part_order=[*programs, "shared", "other"],
+            top_n=settings.top_drugs,
+        )
+        _save_figure(
+            figure, destination / f"{source}_score_contributions.pdf", png=True
+        )
+
+        rows = scores.loc[
+            scores["source"].eq(source)
+            & scores["state"].eq(state)
+            & scores["full_status"].eq("ok")
+        ].set_index("drug")
+        selected = list(
+            dict.fromkeys(
+                drug
+                for column in [
+                    "full",
+                    *(f"restricted_{p}" for p in programs if p != excluded),
+                ]
+                for drug in rows[column].nlargest(settings.top_drugs).index
+            )
+        )
+        matrix = rows.loc[selected, list(columns)].rename(columns=columns)
+        figure, _ = plot_program_matrix(
+            matrix.sort_values("full", ascending=False),
+            color_label="Pearson mimicry\n(positive follows rescue)",
+            title=(
+                f"{source}, {state}: top drugs by full or program-only "
+                "rescue score"
+            ),
+        )
+        _save_figure(
+            figure, destination / f"{source}_program_scores.pdf", png=True
+        )
+
+    controls = tables["positive_controls.csv"]
+    if "state" in controls:
+        shown = controls.loc[controls["state"].eq(state)].copy()
+        if not shown.empty:
+            shown.index = shown["drug"] + " (" + shown["source"] + ")"
+            figure, _ = plot_program_matrix(
+                shown[list(columns)].rename(columns=columns),
+                color_label="Pearson mimicry\n(positive follows rescue)",
+                title=f"Positive controls, {state}",
+            )
+            _save_figure(
+                figure, destination / "positive_controls.pdf", png=True
+            )
+
+
+def _text(
+    values: Mapping[str, object],
+    key: str,
+    *,
+    default: str | None = None,
+) -> str:
+    """Read a nonempty string option; a missing option uses `default`."""
+    value = values.get(key, default)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{key} must be a nonempty string")
+    return value
+
+
+def _texts(
+    values: Mapping[str, object],
+    key: str,
+    *,
+    default: Sequence[str] | None = None,
+) -> tuple[str, ...]:
+    """Read a list of nonempty strings; a missing option uses `default`."""
+    value = values.get(key, default)
+    if not isinstance(value, (list, tuple)) or not all(
+        isinstance(item, str) and item for item in value
+    ):
+        raise ValueError(f"{key} must be a list of nonempty strings")
+    return tuple(value)
 
 
 def _integer(

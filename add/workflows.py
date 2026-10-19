@@ -27,6 +27,7 @@ from add.baselines import predict_pca_ridge
 from add.baselines import score_cmap
 from add.baselines import score_mean_drug
 from add.baselines import score_pca_ridge
+from add.baselines import score_pca_ridge_reference
 from add.baselines import score_train_mean
 from add.baselines import select_signature_genes
 from add.baselines import split_signature_contexts
@@ -552,7 +553,6 @@ def _write_evaluation_outputs(
         ]
     ).to_csv(output_dir / "evaluation_split.csv", index=False)
     if model == "pca-ridge":
-        evaluation.to_csv(output_dir / "matched_evaluation.csv", index=False)
         summarize_heldout_comparisons(
             evaluation,
             random_seed=config.random_seed,
@@ -731,6 +731,11 @@ def _pca_ridge_outputs(
             rescue_vectors,
             minimum_shared_genes=minimum_shared_genes,
         ),
+        pca_ridge_reference=score_pca_ridge_reference(
+            predicted,
+            rescue_vectors,
+            minimum_shared_genes=minimum_shared_genes,
+        ),
         genes=model.genes,
         rescue_vectors=rescue_vectors,
         minimum_shared_genes=minimum_shared_genes,
@@ -745,6 +750,7 @@ def _compare_matched_tahoe_rankings(
     signatures: PerturbSignatures,
     pca_ridge_ranked: pd.DataFrame,
     *,
+    pca_ridge_reference: pd.DataFrame,
     genes: Sequence[str],
     rescue_vectors: Mapping[str, pd.Series],
     minimum_shared_genes: int,
@@ -754,8 +760,10 @@ def _compare_matched_tahoe_rankings(
 ) -> pd.DataFrame:
     """Rescore mean-drug and train-mean on PCA-ridge genes and compare.
 
-    Writes the matched drug table and ranking agreement, and returns the
-    PCA-ridge rankings with their same-gene train-mean reference.
+    Each baseline is compared with its own drug-agnostic reference on these
+    genes: mean-drug with Tahoe train-mean, PCA-ridge with its drug-averaged
+    adipose prediction. Writes the matched drug table and ranking agreement,
+    and returns the PCA-ridge rankings with their reference.
     """
     context_cols = _string_sequence(config.tahoe, "context_cols", "tahoe")
     matched = select_signature_genes(signatures, genes)
@@ -777,7 +785,7 @@ def _compare_matched_tahoe_rankings(
         mechanism_col=_optional_string(config.tahoe.get("mechanism_col")),
         workers=workers,
     )
-    ranked = add_train_mean_reference(pca_ridge_ranked, reference)
+    ranked = add_train_mean_reference(pca_ridge_ranked, pca_ridge_reference)
 
     table, agreement = compare_drug_rankings(
         {
@@ -1098,7 +1106,8 @@ def _write_baseline_figures(
     """Render deterministic summaries from machine-readable baseline results.
 
     The drug-agnostic train mean has no drug rows, so it gets no drug
-    figures; the mean-drug and PCA + ridge rankings draw it as a reference.
+    figures; the mean-drug ranking draws it as a reference, and PCA + ridge
+    draws its own drug-averaged prediction.
     """
     numeric_scores = cast(
         pd.Series,
@@ -1195,12 +1204,18 @@ def _write_ranking_figures(
         if score_col == "score_mimic" and "train_mean_score" in finite
         else None
     )
+    reference_label = (
+        "Drug-averaged prediction (drug-agnostic)"
+        if finite["baseline"].eq("pca-ridge").all()
+        else "Train-mean reference (drug-agnostic)"
+    )
     figure, _ = plot_top_rankings(
         finite,
         adipocyte_state=state,
         top_n=top_n,
         score_col=score_col,
         reference_col=reference_col,
+        reference_label=reference_label,
     )
     _save_report_figure(figure, output_dir / "top_rankings.pdf")
 

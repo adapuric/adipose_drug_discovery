@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
+import importlib.metadata
 import json
+import subprocess
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -261,16 +264,28 @@ def write_provenance(
     inputs: Mapping[str, object],
     parameters: Mapping[str, object],
 ) -> Path:
-    """Write deterministic, human-readable provenance for an analysis stage."""
+    """Write deterministic, human-readable provenance for an analysis stage.
+
+    Besides the stage's inputs and parameters, the record keeps the complete
+    resolved configuration with the config file's SHA256, the source commit
+    (and whether tracked files had uncommitted changes) and installed
+    package versions, so a result stays interpretable after the config file
+    or checkout changes.
+    """
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    config_digest = hashlib.sha256(config.config_path.read_bytes())
     record = {
         "command": command,
         "config_path": str(config.config_path),
+        "config_sha256": config_digest.hexdigest(),
+        "settings": config,
         "created_utc": datetime.now(tz=UTC).isoformat(),
         "inputs": dict(inputs),
         "parameters": dict(parameters),
         "random_seed": config.random_seed,
+        "source_revision": _source_revision(),
+        "versions": _package_versions(),
     }
     with output_path.open("w", encoding="utf-8") as handle:
         json.dump(
@@ -289,6 +304,64 @@ def _mapping_section(
     if not isinstance(value, dict):
         raise ValueError(f"Configuration section {name!r} must be a mapping.")
     return dict(value)
+
+
+def _source_revision() -> dict[str, object]:
+    """Identify the git commit of this package's checkout, when it has one.
+
+    An installed copy outside a checkout reports "unavailable" rather than
+    guessing. Only read-only git commands are used, without optional index
+    locks, so concurrent jobs sharing a checkout do not contend.
+    """
+    checkout = Path(__file__).resolve().parent
+    try:
+        commit = subprocess.run(
+            ["git", "--no-optional-locks", "rev-parse", "HEAD"],
+            cwd=checkout,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        changes = subprocess.run(
+            [
+                "git",
+                "--no-optional-locks",
+                "status",
+                "--porcelain",
+                "--untracked-files=no",
+            ],
+            cwd=checkout,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return {"commit": None, "status": "unavailable"}
+    return {
+        "commit": commit,
+        "status": "uncommitted_changes" if changes.strip() else "clean",
+    }
+
+
+def _package_versions() -> dict[str, str | None]:
+    """Return installed versions of the packages that shape results."""
+    versions: dict[str, str | None] = {}
+    for name in (
+        "adipose-drug-discovery",
+        "anndata",
+        "h5py",
+        "matplotlib",
+        "numpy",
+        "pandas",
+        "pylimma",
+        "scikit-learn",
+        "scipy",
+    ):
+        try:
+            versions[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            versions[name] = None
+    return versions
 
 
 def _json_default(value: object) -> object:

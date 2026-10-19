@@ -39,9 +39,10 @@ qsub -v REPORT=transition \
 - `run_tahoe.pbs`: train-mean, PCA-ridge and mean-drug.
 - `run_lincs.pbs`: CMap.
 - `run_report.pbs`: one CPU report, picked by `REPORT`: `transition` (reads
-  `baselines/pseudobulk/`), `panel` or `perturbgen`. `panel` and `perturbgen`
-  need an absolute `CONFIG_PATH`. `DRY_RUN=1` only validates inputs. Writes to
-  `baselines/reports/<REPORT>/<job id>/` unless `REPORT_DIR` is set.
+  `baselines/pseudobulk/`), `panel`, `perturbgen` or `programs`. `panel`,
+  `perturbgen` and `programs` need an absolute `CONFIG_PATH`. `DRY_RUN=1` only
+  validates inputs. Writes to `baselines/reports/<REPORT>/<job id>/` unless
+  `REPORT_DIR` is set.
 
 `CONFIG_PATH` must be absolute and defaults to the repo config above. Logs go
 to `job_out/<job-name>.<job-id>.live.log`.
@@ -73,16 +74,22 @@ missing, with a reason.
 The CMap scatter is
 the best measured context, not the median score; the mean-drug scatter is the
 drug mean. Train-mean has no drug rows, so it only writes
-`figure_manifest.json`; mean-drug and PCA-ridge rankings draw it as a
-reference line.
+`figure_manifest.json`; the mean-drug ranking draws it as a reference line, and
+PCA-ridge draws its own drug-averaged prediction. `drug_state_scores` rows are
+the drugs with the highest median score across states, so one small or shifted
+state cannot pick them.
+
+Each stage's `provenance.json` keeps the resolved config (`settings`) and its
+`config_sha256`, the source `source_revision` (commit, and whether tracked
+files had uncommitted changes) and package `versions`.
 
 ### Evaluation
 
 `pca_ridge.evaluation_group_cols` holds out whole cell lines, separately from
 the vehicle-matching `tahoe.context_cols`. Every evaluated model writes
-`evaluation_split.csv`. PCA-ridge also writes:
+`evaluation_split.csv`. For PCA-ridge:
 
-- `matched_evaluation.csv`: two comparators on its test rows and genes,
+- `evaluation.csv` also holds two comparators on its test rows and genes,
   `train_mean_*` and `drug_mean_*` (the drug's mean over its training contexts;
   `unseen_drug` if none). PCA-ridge has to beat the drug mean for control
   expression to matter.
@@ -98,12 +105,16 @@ unseen drugs.
 
 Scores are only comparable on the same genes. Mean-drug and PCA-ridge rankings
 carry `train_mean_score` and `score_minus_train_mean` (positive: more
-rescue-like than a generic Tahoe perturbation; descriptive). The PCA-ridge job
-rescores mean-drug and train-mean on its genes and writes:
+rescue-like than the same baseline without drug identity; descriptive). For
+mean-drug that reference is Tahoe train-mean. For PCA-ridge it is the model's
+equal-drug average prediction in the same adipose state: every PCA-ridge drug
+shares that state's adipose-context term, which raw train-mean lacks. The
+PCA-ridge job rescores mean-drug and train-mean on its genes and writes:
 
 - `matched_rankings.csv`: one row per state and drug.
 - `matched_ranking_agreement.csv`: Spearman of drug scores, overlap of the top
-  `pca_ridge.comparison_top_n`, and the fraction above train-mean.
+  `pca_ridge.comparison_top_n`, and the fraction above each baseline's own
+  reference.
 
 CMap isn't matched: LINCS compounds would need a validated name mapping to
 Tahoe.
@@ -164,15 +175,61 @@ Profiles are summed raw counts in log1p-CPM, then paired changes. Predictors:
 
 - no change
 - mean shift: average training-donor change
+- target mean: average training-donor weightloss profile minus the held-out
+  baseline. It predicts that any donor-specific baseline deviation vanishes;
+  a model must beat it to show donor-specific signal that persists between
+  visits rather than reversion to the training average.
 - adipose ridge: training-only PCA/ridge from baseline expression (defaults:
   up to 2,000 genes, 5 PCs, alpha 10; no held-out tuning). Separate from the
   drug `pca-ridge`.
 
 Outputs: `predictions.parquet`, `folds.csv`, `fold_genes.parquet`,
-`metrics.csv`, `paired_model_comparisons.csv` and `summary.csv`
-(donor-bootstrap intervals, not p-values). Unsupported models stay
-non-estimable; error metrics still work when a constant prediction leaves
-correlation undefined.
+`metrics.csv`, `paired_model_comparisons.csv`, `paired_comparison_summary.csv`
+and `summary.csv` (donor-bootstrap intervals, not p-values), and
+`transition_model_comparison.pdf`/`.png` (each donor's error per model).
+Comparisons run each model against every simpler reference (no change, mean
+shift, target mean), once per pair; positive improvement favours the model.
+Unsupported models stay non-estimable; error metrics still work when a constant
+prediction leaves correlation undefined. When no donor has a value, a summary's
+`interval_status` gives the donor-level reason, such as `constant_candidate`.
+
+## Rescue programs: stress versus metabolic signal
+
+The rescue vector mixes programs: an immediate-early/stress response falls in
+almost every donor after weight loss, and lipid-synthesis genes rise. This
+report splits the signal with fixed MSigDB Hallmark sets
+(`config/rescue_programs.yaml`; download the GMT from `gene_sets_source`):
+
+```bash
+python -m run_scripts.baselines.decompose_rescue_programs --dry-run
+python -m run_scripts.baselines.decompose_rescue_programs
+```
+
+- `hallmark_rescue_summary.csv`: every Hallmark set per state: mean rescue t,
+  fraction falling, and the shift against other tested genes. No p-values;
+  genes are not independent.
+- `donor_program_scores.csv`: per donor and condition (Lean included for
+  reference), each program's mean gene z score over whole-adipocyte log1p-CPM.
+  `donor_program_changes.csv` holds paired weightloss - baseline changes;
+  `program_change_summary.csv` and `program_change_correlations.csv`
+  summarize them over donors (overall and by study) and against BMI change.
+- `drug_program_decomposition.parquet` / `drug_program_scores.csv`: each
+  drug's equal-context mean signature, per source and state. `full` is the
+  Pearson mimicry score; `contribution_<group>` splits it exactly by gene group
+  (a program, "shared" between programs, or "other"); `restricted_<program>`
+  correlates only that program's genes; `restricted_without_<excluded>` drops
+  the excluded program.
+- `program_ranking_agreement.csv`: how far each restricted ranking matches the
+  full one. `positive_controls.csv`: configured compounds (rosiglitazone,
+  GW7647); missing ones are `not_available`, never substituted.
+- Figures: `hallmark_rescue_shift`, `donor_program_scores`,
+  `<source>_score_contributions`, `<source>_program_scores`,
+  `positive_controls`.
+
+Sampling stress and biology share a time point here, so this decomposition
+labels and isolates the stress program but cannot prove it is technical; that
+needs the biopsy protocol. With the full Tahoe cache, request memory as for
+`run_tahoe.pbs` (see the `programs` example in `run_report.pbs`).
 
 ## PerturbGen naive edit baselines
 

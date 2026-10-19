@@ -16,6 +16,7 @@ from add.baselines.models import evaluate_pca_ridge
 from add.baselines.models import fit_pca_ridge
 from add.baselines.models import predict_pca_ridge
 from add.baselines.models import score_pca_ridge
+from add.baselines.models import score_pca_ridge_reference
 from add.baselines.signatures import select_signature_genes
 
 
@@ -32,6 +33,7 @@ __all__ = [
     "score_cmap",
     "score_mean_drug",
     "score_pca_ridge",
+    "score_pca_ridge_reference",
     "score_train_mean",
     "select_signature_genes",
     "split_signature_contexts",

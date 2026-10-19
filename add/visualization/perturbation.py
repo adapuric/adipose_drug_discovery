@@ -419,15 +419,16 @@ def _effect_label(effects: pd.DataFrame) -> str:
 def _transition_model_colors(models: pd.Series) -> dict[str, str]:
     """Map each model to its colour, in display order.
 
-    The no-change and mean-shift references come first, then the adipose
-    ridge, then other exports sorted by name.
+    The no-change, mean-shift and target-mean references come first, then
+    the adipose ridge, then other exports sorted by name.
     """
     reference_colors = {
         "adipose-no-change": "#999999",
         "adipose-mean-shift": "#E69F00",
+        "adipose-target-mean": "#D55E00",
         "adipose-ridge": "#0072B2",
     }
-    export_colors = ("#009E73", "#CC79A7", "#56B4E9", "#D55E00")
+    export_colors = ("#009E73", "#CC79A7", "#56B4E9")
     observed = set(models.astype(str))
 
     colors = {

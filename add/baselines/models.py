@@ -432,6 +432,65 @@ def score_pca_ridge(
     return _rank_scores(pd.DataFrame(rows), score_col="score")
 
 
+def score_pca_ridge_reference(
+    predicted_signatures: PerturbSignatures,
+    rescue_vectors: Mapping[str, pd.Series],
+    *,
+    minimum_shared_genes: int = 3,
+) -> pd.DataFrame:
+    """Score each state's drug-averaged PCA + ridge prediction.
+
+    The model has no drug-by-context interaction, so every drug's prediction
+    in a state carries the same adipose-context term. The equal-drug average
+    keeps that term and drops drug identity, making it the model's own
+    drug-agnostic reference. Raw Tahoe train-mean lacks the context term, so
+    PCA + ridge drugs compared with it would share an offset that has
+    nothing to do with drug identity.
+
+    Returns:
+      One row per state with `state`, `score` and `score_status`, in the
+      canonical score schema.
+    """
+    if "state" not in predicted_signatures.meta:
+        raise KeyError("Predicted signature metadata lacks 'state'.")
+    rescue_by_state = dict(_validated_rescue_vectors(rescue_vectors))
+
+    rows: list[dict[str, object]] = []
+    states = predicted_signatures.meta["state"].astype(str).to_numpy()
+    for state in pd.unique(states):
+        if state not in rescue_by_state:
+            raise KeyError(
+                f"No rescue vector was supplied for state {state!r}."
+            )
+        rescue = rescue_by_state[state]
+        positions = np.flatnonzero(states == state)
+
+        drug_average = _dense_matrix(
+            predicted_signatures.delta[positions]
+        ).mean(axis=0)
+        score = _mimic_fields(
+            drug_average,
+            predicted_signatures.genes,
+            rescue.to_numpy(dtype=float),
+            [str(gene) for gene in rescue.index],
+            minimum_shared_genes=minimum_shared_genes,
+        )
+        rows.append(
+            _canonical_score_row(
+                state=state,
+                score=score,
+                source="tahoe",
+                baseline="pca-ridge-drug-average",
+                score_name="pearson_mimic",
+                drug=pd.NA,
+                signature_id="PCA_RIDGE_DRUG_AVERAGE",
+                context=f"adipose:{state}",
+                n_external_contexts=pd.NA,
+            )
+        )
+    return pd.DataFrame(rows)
+
+
 def _validated_model_columns(
     metadata: pd.DataFrame,
     *,

@@ -92,6 +92,7 @@ embedding:
   mask_scheduler: pow
  
 perturbation:
+  summarize: false
   decoder_checkpoint_path: null
   genes_to_perturb: []
   mode: mask

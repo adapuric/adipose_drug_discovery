@@ -53,7 +53,7 @@ pg_results/<run_name>/
     └── mask_src/<gene>/
         ├── native_config.yaml
         ├── <PerturbGen result>.h5ad
-        └── summary/
+        └── summary/            # when perturbation.summarize is true
 ```
 
 PerturbGen creates tokenized data in `tokenized_data/<run_name>` beneath its
@@ -90,6 +90,10 @@ tokenize:
   reference_time: normal
   time_point_order: [normal, 90m_LPS, 6h_LPS, 10h_LPS]
   # Remaining tokenize keys as in config.yaml.
+
+perturbation:
+  summarize: false
+  # Remaining perturbation keys as in config.yaml.
 ```
 
 ```bash
@@ -106,8 +110,12 @@ Notes:
   wrappers follow it.
 - Set `masking.sampling_keys` if `masking.use_weighted_sampler` is true.
 - `conditioning_obs_cols: []` trains without condition tokens.
-- `run_perturbation` still needs a `prepare` section for its donor/state
-  summaries.
+- `perturbation.summarize` defaults to `true` and requires a `prepare` section
+  for donor/state grouping. Set it to `false` for inference without those
+  summaries, as in the LPS example. The wrapper still checks its inputs and
+  requires a non-empty inference result, writes the native config, and logs
+  the result path. This setting also applies to PBS submissions using that
+  config.
 
 
 <br>
