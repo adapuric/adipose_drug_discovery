@@ -8,7 +8,7 @@ CONFIG_PATHS=(
 )
 
 MASKING_CHECKPOINTS=(
-  "${PROJECT_DIR}/pg_results/ adipocytes_run2B_obese_weightloss_hvg_cellstate_pairing/masking/checkpoints/20261008_1128_cellgen_train_masking_lr_0.0001_wd_0.0001_batch_64_ptime_pos_sin_m_pow_tp_1_s_42-epoch_19-loss_4.75989103317.ckpt"
+  "${PROJECT_DIR}/pg_results/adipocytes_run2B_obese_weightloss_hvg_cellstate_pairing/masking/checkpoints/20261008_1128_cellgen_train_masking_lr_0.0001_wd_0.0001_batch_64_ptime_pos_sin_m_pow_tp_1_s_42-epoch_19-loss_4.75989103317.ckpt"
 )
 
 for i in "${!CONFIG_PATHS[@]}"; do
